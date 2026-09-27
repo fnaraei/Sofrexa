@@ -18,6 +18,7 @@ It is **local-first**. The cashier PC runs the in-house server, so service never
 - **[docs/screens.md](docs/screens.md)** — all 73 designed screens, each linking to its Figma frame.
 - **[docs/design-handoff.md](docs/design-handoff.md)** — tokens → CSS variables, components and layout rules. The build follows Figma exactly.
 - **[docs/figma-ids.json](docs/figma-ids.json)** — Figma page, component and variable-collection IDs.
+- **[docs/itkafe-schema.md](docs/itkafe-schema.md)** — map of the legacy ItKafe database, for the migration.
 
 **Design (source of truth):** https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw
 
