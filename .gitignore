@@ -1,0 +1,10 @@
+# local data, secrets and backups never go to git
+/storage/
+/config.php
+*.sqlite
+*.sqlite-*
+*.bak
+/itkafe-backup/
+.env
+Thumbs.db
+.DS_Store
