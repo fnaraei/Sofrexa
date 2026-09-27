@@ -8,5 +8,7 @@ Restaurant management system for BASILIC Cafe & Restaurant — replaces the lega
 
 Folders:
 
-- `docs/` — design notes and screen index
-- `design/` — exported screenshots of Figma screens
+- `docs/screens.md` — index of all 73 screens with direct Figma links
+- `docs/design-handoff.md` — tokens → CSS variables, components, layout rules for implementation
+- `docs/figma-ids.json` — Figma page, component and variable-collection IDs
+- `design/` — overview image of each Figma page
