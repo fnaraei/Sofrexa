@@ -1,4 +1,4 @@
-# Design handoff — BASILIC POS
+# Design handoff — Sofrexa
 
 Figma file: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw (source of truth).
 **Rule:** the app is built to match Figma exactly — same tokens, same components, same spacing, on mobile and desktop.
@@ -50,7 +50,9 @@ Every Figma variable has its CSS name set as "code syntax" (Dev Mode shows it). 
 | Key/Keypad | | PIN and amounts |
 | KDS/TicketHeader, KDS/ItemRow | New/Cooking/Late/Ready; Todo/Done | kitchen TV (Dark) |
 | Customer/DishCard, Customer/CartBar | Default/InCart | QR and online menu (Dark) |
-| Logo | S/L | leaf mark + wordmark; the customer pages use the real logo image |
+| Logo/Basilic | S/L | tenant logo: leaf mark + BASILIC wordmark |
+| Logo/Sofrexa | Type Full/Mark x Theme Light/Dark | platform logo (raster asset from `brand/`). Theme only swaps the raster; text tokens follow the frame mode |
+| Brand/PoweredBy | Theme Light/Dark | `POWERED BY` + Sofrexa mark and wordmark. Sits under the tenant logo on login and customer pages |
 
 ## 3. Layout rules
 

@@ -6,7 +6,10 @@
     "Color": "VariableCollectionId:3:3",
     "Spacing": "VariableCollectionId:3:4"
   },
-  "modes": { "Light": "3:1", "Dark": "3:2" },
+  "modes": {
+    "Light": "3:1",
+    "Dark": "3:2"
+  },
   "pages": {
     "cover": "0:1",
     "foundations": "4:2",
@@ -61,12 +64,31 @@
     "SheetHeader": "11:158",
     "Key": "11:170",
     "Keypad": "11:171",
-    "Logo": "12:128",
     "KDS/TicketHeader": "12:189",
     "KDS/ItemRow": "12:204",
     "Customer/DishCard": "12:234",
     "Customer/CartBar": "12:235",
-    "SideNav": "12:241"
+    "SideNav": "12:241",
+    "Logo/Basilic": "12:128",
+    "Logo/Sofrexa": "64:186",
+    "Brand/PoweredBy": "64:193"
   },
-  "counts": { "screens": 73, "componentSets": 34, "icons": 98, "variables": 123, "textStyles": 29, "effectStyles": 4 }
+  "counts": {
+    "screens": 73,
+    "componentSets": 36,
+    "icons": 98,
+    "variables": 123,
+    "textStyles": 29,
+    "effectStyles": 4
+  },
+  "brand": {
+    "assetsInRepo": "brand/",
+    "figmaImageHashes": {
+      "logo-on-light": "ea6c17ed83ee921d8480c5f5ffaa95d053a5097a",
+      "logo-on-dark": "f74af962a2c9f86078503d177fa9d2ca184b46a8",
+      "mark-on-light": "3769aa1d624dbe7a7cdff60d7e3f05522ecddaeb",
+      "mark-on-dark": "430f45acf09e2d51ea3c9caf4eac2bd3eb009847"
+    },
+    "wordmarkFont": "Manrope ExtraBold, letter-spacing 4%"
+  }
 }
