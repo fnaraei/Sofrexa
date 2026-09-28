@@ -108,3 +108,28 @@ function phone_norm(?string $phone): string
     }
     return $d;
 }
+
+/** "Bugün 09:01", "Dün 22:40", or "02.09.2026" for older times. */
+function when_label(?int $ms): string
+{
+    if (!$ms) {
+        return '—';
+    }
+    $ts = intdiv($ms, 1000);
+    $time = date('H:i', $ts);
+    $day = date('Y-m-d', $ts);
+    if ($day === date('Y-m-d')) {
+        return t('time.today_at', ['time' => $time]);
+    }
+    if ($day === date('Y-m-d', strtotime('-1 day'))) {
+        return t('time.yesterday_at', ['time' => $time]);
+    }
+    $s = date('d.m.Y', $ts);
+    return I18n::lang() === 'fa' ? I18n::faDigits($s) : $s;
+}
+
+/** Digits in the user's language (Persian digits for fa). */
+function digits(string|int $s): string
+{
+    return I18n::lang() === 'fa' ? I18n::faDigits((string) $s) : (string) $s;
+}

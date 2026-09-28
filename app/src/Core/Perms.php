@@ -10,8 +10,11 @@ final class Perms
         'orders' => ['orders.take', 'orders.qr_approve', 'orders.void', 'orders.discount'],
         'cash' => ['cash.pay', 'cash.moves', 'cash.nosale', 'cash.shift'],
         'kitchen_stock' => ['kitchen.ready', 'stock.manage'],
-        'admin' => ['menu.manage', 'reports.view', 'finance.manage', 'staff.manage', 'backup.manage', 'settings.manage'],
+        'admin' => ['menu.manage', 'reports.view', 'finance.manage', 'staff.manage', 'backup.manage'],
     ];
+
+    /** Kept out of the matrix (ST5): only the manager role (*) has it. */
+    public const MANAGER_ONLY = ['settings.manage'];
 
     /** Permissions implied by others (kept out of the matrix to keep it short). */
     public const IMPLIED = [
@@ -36,6 +39,12 @@ final class Perms
     public static function all(): array
     {
         return array_merge(...array_values(self::GROUPS));
+    }
+
+    /** Matrix permissions of a role, dropping anything unknown (e.g. from an older version). */
+    public static function clean(array $perms): array
+    {
+        return in_array('*', $perms, true) ? ['*'] : array_values(array_intersect(self::all(), $perms));
     }
 
     /** Expand a role's matrix permissions with the implied ones. */

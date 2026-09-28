@@ -16,7 +16,7 @@ final class Audit
         'price' => ['menu.price', 'menu.bulk_price'],
         'cash' => ['cash.in', 'cash.out', 'cash.nosale', 'cash.open', 'shift.close'],
         'login' => ['auth.login', 'auth.logout', 'auth.pin_failed', 'auth.password_failed'],
-        'settings' => ['settings.save', 'backup.create', 'backup.restore', 'user.save', 'user.delete', 'user.reset_pin', 'role.save'],
+        'settings' => ['settings.save', 'backup.create', 'backup.restore', 'user.save', 'user.delete', 'user.reset_pin', 'user.password_link', 'user.password_set', 'role.save'],
     ];
 
     public static function log(string $action, string $summary = '', ?string $entity = null, ?string $entityId = null, array $detail = [], ?array $actor = null): void
@@ -53,6 +53,34 @@ final class Audit
             str_contains($ua, 'Windows') => 'Windows PC',
             str_contains($ua, 'Macintosh') => 'Mac',
             default => 'web',
+        };
+    }
+
+    /**
+     * Badge label key, tone and icon for an action (ST6 badge, ST7 icon circle).
+     * @return array{0:string,1:string,2:string}
+     */
+    public static function meta(string $action): array
+    {
+        return match (true) {
+            in_array($action, ['order.void_item', 'order.void'], true) => ['audit.a.void', 'danger', 'x-circle'],
+            $action === 'order.discount' => ['audit.a.discount', 'accent', 'percent'],
+            in_array($action, ['menu.price', 'menu.bulk_price'], true) => ['audit.a.price', 'info', 'tag'],
+            $action === 'cash.nosale' => ['audit.a.nosale', 'warning', 'lock'],
+            $action === 'cash.out' => ['audit.a.cash_out', 'warning', 'wallet'],
+            $action === 'cash.in' => ['audit.a.cash_in', 'success', 'wallet'],
+            in_array($action, ['cash.open', 'shift.close'], true) => ['audit.a.shift', 'neutral', 'receipt'],
+            $action === 'auth.login' => ['audit.a.login', 'neutral', 'user'],
+            $action === 'auth.logout' => ['audit.a.logout', 'neutral', 'logout'],
+            in_array($action, ['auth.pin_failed', 'auth.password_failed'], true) => ['audit.a.login_failed', 'danger', 'alert'],
+            str_starts_with($action, 'backup.') => [$action === 'backup.restore' ? 'audit.a.restore' : 'audit.a.backup', $action === 'backup.restore' ? 'danger' : 'info', 'history'],
+            str_starts_with($action, 'user.') || str_starts_with($action, 'role.') => ['audit.a.users', $action === 'user.delete' ? 'danger' : 'info', 'users'],
+            str_starts_with($action, 'settings.') => ['audit.a.settings', 'info', 'settings'],
+            str_starts_with($action, 'menu.') => ['audit.a.menu', 'info', 'utensils'],
+            str_starts_with($action, 'stock.') => ['audit.a.stock', 'neutral', 'box'],
+            str_starts_with($action, 'loyalty.') || str_starts_with($action, 'customer.') => ['audit.a.customer', 'accent', 'star'],
+            str_starts_with($action, 'finance.') => ['audit.a.finance', 'info', 'wallet'],
+            default => ['audit.a.other', 'neutral', 'info'],
         };
     }
 

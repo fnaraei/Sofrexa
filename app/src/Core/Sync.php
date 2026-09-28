@@ -16,7 +16,7 @@ final class Sync
     public const MUTABLE = [
         'settings', 'roles', 'users', 'areas', 'tables', 'categories', 'items', 'modifier_groups', 'modifiers',
         'item_modifier_groups', 'tiers', 'customers', 'customer_addresses', 'online_accounts', 'suppliers',
-        'stock_items', 'recipes', 'recurring_expenses', 'orders', 'order_items', 'shifts', 'qr_sessions',
+        'stock_items', 'recipes', 'recurring_expenses', 'orders', 'order_items', 'shifts', 'qr_sessions', 'password_resets',
     ];
 
     /** Append-only replicated tables (id, never updated). */

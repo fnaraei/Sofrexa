@@ -2,7 +2,7 @@
 /**
  * Staff shell. Desktop (≥1024px): SideNav + page head. Mobile: AppBar, content, action bar or tab bar.
  * Page variables: $title, $sub, $back, $nav, $tab, $appActions[], $headActions, $bottom, $theme,
- * $scripts[], $noTabbar, $noHead, $bodyClass.
+ * $scripts[], $noTabbar, $noHead, $bodyClass, $appSub (phone subtitle when it differs from the desktop one).
  */
 use Sofrexa\Core\I18n;
 use Sofrexa\Core\Settings;
@@ -13,6 +13,7 @@ $u = user();
 $nav ??= '';
 $tab ??= $nav;
 $sub ??= '';
+$appSub ??= $sub;
 $back ??= null;
 $appActions ??= [];
 $headActions ??= '';
@@ -47,7 +48,7 @@ $lang = I18n::lang();
   <main class="main">
     <header class="appbar">
       <?php if ($back): ?><a class="appbar__back" href="<?= e($back) ?>" aria-label="<?= e(t('ui.back')) ?>"><?= icon('arrow-left', 24) ?></a><?php endif ?>
-      <div class="appbar__titles"><div class="appbar__title"><?= e($title ?? '') ?></div><?php if ($sub !== ''): ?><div class="appbar__sub"><?= e($sub) ?></div><?php endif ?></div>
+      <div class="appbar__titles"><div class="appbar__title"><?= e($title ?? '') ?></div><?php if ($appSub !== ''): ?><div class="appbar__sub"><?= e($appSub) ?></div><?php endif ?></div>
       <?php foreach ($appActions as $a) echo $a; ?>
     </header>
     <?php if (empty($noHead)): ?><?= Ui::pageHead($title ?? '', $sub, $headActions) ?><?php endif ?>

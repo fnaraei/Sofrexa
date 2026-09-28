@@ -43,6 +43,11 @@ try {
     $router = new Router();
     require APP_DIR . '/routes.php';
     $router->dispatch(new Request());
+} catch (\InvalidArgumentException $e) {
+    // Validation and business-rule errors: the message is already translated.
+    $req = new Request();
+    $errors = $e instanceof \Sofrexa\Core\ValidationError ? $e->errors : [];
+    Response::fail($req, $e->getMessage(), 422, $errors ? ['errors' => $errors] : []);
 } catch (HttpError $e) {
     $req = new Request();
     if ($req->wantsJson()) {

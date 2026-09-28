@@ -143,7 +143,7 @@ final class Ui
 
     public static function who(string $name, ?string $sub = null, string $size = 's'): string
     {
-        return '<span class="who">' . self::avatar($name, $size) . '<span class="col gap-2" style="gap:0;min-width:0"><span class="who__name ellipsis">' . e($name) . '</span>'
+        return '<span class="who' . ($size === 'm' ? ' who--m' : '') . '">' . self::avatar($name, $size) . '<span class="col gap-2" style="gap:0;min-width:0"><span class="who__name ellipsis">' . e($name) . '</span>'
             . ($sub !== null && $sub !== '' ? '<span class="who__sub ellipsis">' . e($sub) . '</span>' : '') . '</span></span>';
     }
 
@@ -201,7 +201,7 @@ final class Ui
 
     public static function sheetHead(string $title): string
     {
-        return '<div class="sheet__handle"></div><div class="sheet__head"><h2 class="sheet__title">' . e($title) . '</h2><button type="button" class="sheet__close" data-close aria-label="' . e(t('ui.close')) . '">' . icon('close', 22) . '</button></div>';
+        return '<div class="sheet__handle"></div><div class="sheet__head"><h2 class="sheet__title">' . e($title) . '</h2><button type="button" class="sheet__close" data-close aria-label="' . e(t('ui.close')) . '">' . icon('close', 20) . '</button></div>';
     }
 
     /** Header row of a desktop page (title, subtitle, actions). */

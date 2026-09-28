@@ -231,3 +231,9 @@
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
 })();
+
+/* Filter forms: submit when a date or select changes. */
+document.addEventListener('change', function (e) {
+  const f = e.target.closest('form[data-autosubmit]');
+  if (f && (e.target.type === 'date' || e.target.tagName === 'SELECT')) f.submit();
+});
