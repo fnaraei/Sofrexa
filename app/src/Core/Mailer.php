@@ -82,7 +82,8 @@ final class Mailer
 
     private static function log(array $headers, string $body): bool
     {
-        $file = App::storage('mail') . '/' . date('Ymd-His') . '-' . bin2hex(random_bytes(3)) . '.eml';
+        // names sort in the order the mails were written (microseconds), which the tests rely on
+        $file = App::storage('mail') . '/' . date('Ymd-His') . '-' . sprintf('%06d', (int) (fmod(microtime(true), 1) * 1_000_000)) . '-' . bin2hex(random_bytes(3)) . '.eml';
         return (bool) file_put_contents($file, self::raw($headers, $body));
     }
 

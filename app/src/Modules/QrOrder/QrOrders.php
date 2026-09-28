@@ -99,11 +99,14 @@ final class QrOrders
                     'options' => array_map(static fn(array $m): array => ['id' => $m['id'], 'name' => tn($m['names']), 'price' => (int) $m['price']], $g['options']),
                 ];
             }
+            $promo = \Sofrexa\Modules\Menu\Promotions::best($i, $flag === 'show_online' ? 'online' : 'table');
             $cats[$i['category_id']]['items'][] = [
                 'id' => $i['id'],
                 'name' => tn($i['names']),
                 'desc' => tn($i['descs']),
-                'price' => (int) $i['price'],
+                'price' => $promo ? \Sofrexa\Modules\Menu\Promotions::price((int) $i['price'], (float) $promo['pct']) : (int) $i['price'],
+                'was' => $promo ? (int) $i['price'] : null,
+                'promo' => $promo ? tn($promo['names']) : null,
                 'photo' => Menu::photoUrl($i['image'], 400),
                 'orderable' => $i['orderable'],
                 'groups' => $opts,

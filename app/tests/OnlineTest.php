@@ -10,7 +10,7 @@ use Sofrexa\Setup\Seed;
 
 $lastCode = static function (): string {
     $files = glob(App::storage('mail') . '/*.eml') ?: [];
-    usort($files, static fn(string $a, string $b): int => filemtime($b) <=> filemtime($a) ?: strcmp($b, $a));
+    rsort($files); // the names sort by the time they were written
     [, $body] = explode("\r\n\r\n", (string) file_get_contents($files[0]), 2);
     preg_match('/\b(\d{6})\b/', (string) base64_decode(preg_replace('/\s+/', '', $body) ?? ''), $m);
     return $m[1] ?? '';

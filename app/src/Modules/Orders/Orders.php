@@ -134,8 +134,11 @@ final class Orders
         }
         [$modRows, $modsPrice] = self::mods($itemId, $mods);
         $note = mb_substr(trim($note), 0, 200);
-        $same = Db::value("SELECT id FROM order_items WHERE order_id = ? AND item_id = ? AND status = 'new' AND deleted = 0 AND mods = ? AND COALESCE(note, '') = ?",
-            [$orderId, $itemId, json_encode($modRows, JSON_UNESCAPED_UNICODE), $note]);
+        // a promotion running now for this channel lowers the dish price (options keep theirs)
+        $promo = \Sofrexa\Modules\Menu\Promotions::best($item, \Sofrexa\Modules\Menu\Promotions::channelOf((string) $o['channel']));
+        $unit = $promo ? \Sofrexa\Modules\Menu\Promotions::price((int) $item['price'], (float) $promo['pct']) : (int) $item['price'];
+        $same = Db::value("SELECT id FROM order_items WHERE order_id = ? AND item_id = ? AND status = 'new' AND deleted = 0 AND mods = ? AND COALESCE(note, '') = ? AND unit_price = ?",
+            [$orderId, $itemId, json_encode($modRows, JSON_UNESCAPED_UNICODE), $note, $unit]);
         if ($same) {
             Db::exec('UPDATE order_items SET qty = qty + ?, updated_at = ? WHERE id = ?', [$qty, Clock::ms(), $same]);
             \Sofrexa\Core\Sync::touch('order_items', $same);
@@ -148,7 +151,9 @@ final class Orders
             'item_id' => $itemId,
             'name' => $names['tr'] ?? tn($names),
             'qty' => $qty,
-            'unit_price' => (int) $item['price'],
+            'unit_price' => $unit,
+            'promo_id' => $promo['id'] ?? null,
+            'list_price' => $promo ? (int) $item['price'] : null,
             'mods' => $modRows,
             'mods_price' => $modsPrice,
             'note' => $note !== '' ? $note : null,
