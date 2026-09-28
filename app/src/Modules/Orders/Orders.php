@@ -479,9 +479,12 @@ final class Orders
     private static function close(string $orderId): void
     {
         Db::save('orders', ['id' => $orderId, 'status' => 'paid', 'closed_at' => Clock::ms()]);
-        Db::exec("UPDATE order_items SET status = 'served', served_at = COALESCE(served_at, ?), updated_at = ? WHERE order_id = ? AND status IN ('sent', 'ready') AND deleted = 0", [Clock::ms(), Clock::ms(), $orderId]);
-        foreach (Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'served'", [$orderId]) as $l) {
-            \Sofrexa\Core\Sync::touch('order_items', $l['id']);
+        // a table that pays has eaten; a takeaway paid at the counter is still being cooked
+        if (in_array(Db::value('SELECT channel FROM orders WHERE id = ?', [$orderId]), ['table', 'qr'], true)) {
+            Db::exec("UPDATE order_items SET status = 'served', served_at = COALESCE(served_at, ?), updated_at = ? WHERE order_id = ? AND status IN ('sent', 'ready') AND deleted = 0", [Clock::ms(), Clock::ms(), $orderId]);
+            foreach (Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'served'", [$orderId]) as $l) {
+                \Sofrexa\Core\Sync::touch('order_items', $l['id']);
+            }
         }
         if (class_exists(\Sofrexa\Modules\Customers\Loyalty::class)) {
             \Sofrexa\Modules\Customers\Loyalty::earn($orderId);

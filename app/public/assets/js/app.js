@@ -95,7 +95,7 @@
       el.appendChild(b);
     }
     box.appendChild(el);
-    setTimeout(() => el.remove(), type === 'error' ? 6000 : 3500);
+    setTimeout(() => el.remove(), type === 'error' ? 6000 : (action ? 10000 : 3500));
   };
 
   /* ------------------------------------------------------------ sheets (bottom sheet / dialog) */
