@@ -102,6 +102,8 @@ final class WebsiteImport
         });
         $say("$photos photos copied to storage/uploads/menu");
 
+        self::floor($src, $say);
+
         // Brand: logo file and the leaf mark used by the staff app and receipts.
         $logo = dirname(rtrim($uploads, '/\\')) . '/assets/img/brand/logo-512.png';
         $brandDir = App::storage('uploads') . '/brand';
@@ -126,6 +128,44 @@ final class WebsiteImport
             Settings::setMany($profile);
             $say('restaurant profile: ' . implode(', ', array_keys($profile)));
         }
+    }
+
+    /**
+     * Seating areas and tables with their QR codes (website tables `areas`, `dining_tables`), so the
+     * printed table cards keep working. The development copy of the website has no floor plan; point the
+     * import at a copy of the production database to bring it in.
+     */
+    private static function floor(\PDO $src, callable $say): void
+    {
+        $has = static fn(string $t): bool => (bool) $src->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = " . $src->quote($t))->fetchColumn();
+        if (!$has('areas') || !$has('dining_tables')) {
+            $say('no floor plan in this database (areas / dining_tables) — skipped');
+            return;
+        }
+        $areas = 0;
+        $tables = 0;
+        Db::tx(static function () use ($src, &$areas, &$tables): void {
+            $areaIds = [];
+            foreach ($src->query('SELECT * FROM areas ORDER BY sort_order, id') as $a) {
+                $legacy = 'web:area:' . $a['id'];
+                $names = self::langs($a, 'name');
+                $row = ['name' => $names['tr'] ?? reset($names) ?: 'Salon', 'names' => $names, 'smoking' => (int) ($a['is_smoking'] ?? 0), 'sort' => (int) ($a['sort_order'] ?? 0)];
+                $id = Db::value('SELECT id FROM areas WHERE name = ? AND deleted = 0', [$row['name']]);
+                $areaIds[$a['id']] = Db::save('areas', ($id ? ['id' => $id] : []) + $row);
+                $areas++;
+            }
+            foreach ($src->query('SELECT * FROM dining_tables ORDER BY area_id, id') as $t) {
+                if (!isset($areaIds[$t['area_id']])) {
+                    continue;
+                }
+                $code = strtolower((string) $t['code']);
+                $id = Db::value('SELECT id FROM tables WHERE code = ?', [$code]);
+                $n = (string) $t['number'];
+                Db::save('tables', ($id ? ['id' => $id] : []) + ['area_id' => $areaIds[$t['area_id']], 'number' => $n, 'code' => $code, 'sort' => ctype_digit($n) ? (int) $n * 10 : 9999]);
+                $tables++;
+            }
+        });
+        $say("$areas areas, $tables tables (QR codes kept)");
     }
 
     private static function langs(array $row, string $field): array

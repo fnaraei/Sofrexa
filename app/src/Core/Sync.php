@@ -29,6 +29,9 @@ final class Sync
 
     public static function touch(string $table, string $id): void
     {
+        if (($table === 'items' || $table === 'categories') && App::isWeb()) {
+            \Sofrexa\Integrations\WebsiteMenu::touch();
+        }
         if (self::$muted || !self::enabled() || (!in_array($table, self::MUTABLE, true) && !in_array($table, self::APPEND, true))) {
             return;
         }

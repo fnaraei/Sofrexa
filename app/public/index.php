@@ -40,6 +40,19 @@ try {
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
 
+    // On the web copy: after the response, bring the website's menu tables up to date if the menu changed.
+    if (App::isWeb() && \Sofrexa\Integrations\WebsiteMenu::configured()) {
+        register_shutdown_function(static function (): void {
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            }
+            try {
+                \Sofrexa\Integrations\WebsiteMenu::syncIfDirty();
+            } catch (\Throwable $e) {
+                App::log('website', $e->getMessage());
+            }
+        });
+    }
     $router = new Router();
     require APP_DIR . '/routes.php';
     $router->dispatch(new Request());

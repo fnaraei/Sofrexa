@@ -91,29 +91,33 @@ final class Seed
             }
         }
         if (!Db::value('SELECT COUNT(*) FROM areas')) {
-            $plan = ['Salon' => range(1, 12), 'Bahçe' => range(13, 22), 'Teras' => range(23, 28)];
+            $plan = [
+                'Bahçe' => [range(1, 14), ['tr' => 'Bahçe', 'en' => 'Garden', 'fa' => 'باغ', 'ru' => 'Сад'], 0],
+                'Salon' => [range(1, 12), ['tr' => 'Salon', 'en' => 'Dining room', 'fa' => 'سالن', 'ru' => 'Зал'], 0],
+                'Sigara salonu' => [range(1, 8), ['tr' => 'Sigara salonu', 'en' => 'Smoking room', 'fa' => 'سالن سیگار', 'ru' => 'Зал для курящих'], 1],
+            ];
             $sort = 0;
-            foreach ($plan as $area => $numbers) {
-                $areaId = Db::save('areas', ['name' => $area, 'sort' => $sort += 10]);
+            foreach ($plan as $area => [$numbers, $names, $smoking]) {
+                $areaId = Db::save('areas', ['name' => $area, 'names' => $names, 'smoking' => $smoking, 'sort' => $sort += 10]);
                 foreach ($numbers as $i => $n) {
                     Db::save('tables', ['area_id' => $areaId, 'number' => (string) $n, 'seats' => $n % 3 === 0 ? 6 : 4, 'code' => self::tableCode(), 'sort' => $i * 10]);
                 }
             }
-            $say('areas and 28 tables');
+            $say('3 areas and 34 tables');
         }
         $say('Demo data ready (PINs are listed in app/src/Setup/Seed.php → DEMO_STAFF).');
     }
 
-    /** Random, unambiguous 8-character code for a table QR link. */
+    /** Random 6-character code for a table QR link, same format as the website's cards (at least one letter). */
     public static function tableCode(): string
     {
         $alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
         do {
             $code = '';
-            for ($i = 0; $i < 8; $i++) {
+            for ($i = 0; $i < 6; $i++) {
                 $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
             }
-        } while (Db::value('SELECT 1 FROM tables WHERE code = ?', [$code]));
+        } while (!preg_match('/[a-z]/', $code) || Db::value('SELECT 1 FROM tables WHERE code = ?', [$code]));
         return $code;
     }
 }

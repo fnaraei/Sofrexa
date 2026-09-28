@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Sofrexa\Sync;
 
-use Sofrexa\Core\{Db, Settings, Sync};
+use Sofrexa\Core\{App, Db, Settings, Sync};
 
 /**
  * Reading outgoing changes and applying incoming ones. Mutable rows: last write wins on updated_at.
@@ -51,6 +51,9 @@ final class Apply
             });
         });
         Settings::flush();
+        if (App::isWeb() && array_intersect(array_column($rows, 't'), ['items', 'categories', 'order_items'])) {
+            \Sofrexa\Integrations\WebsiteMenu::touch(); // prices, visibility or sold-out state may have changed
+        }
         return $n;
     }
 

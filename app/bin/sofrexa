@@ -49,6 +49,13 @@ try {
             Migrator::run();
             Sofrexa\Setup\WebsiteImport::run($args[0] ?? '', $args[1] ?? '', $say);
             break;
+        case 'website:sync':
+            // Writes the menu into the restaurant website's own tables (config 'website_menu'; run on the web copy).
+            if (!Sofrexa\Integrations\WebsiteMenu::configured()) {
+                throw new RuntimeException("'website_menu' is not configured in app/config.php");
+            }
+            $say(json_encode(Sofrexa\Integrations\WebsiteMenu::sync()));
+            break;
         case 'serve':
             $port = (int) ($args[0] ?? 8090);
             $pub = realpath(__DIR__ . '/../public');

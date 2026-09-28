@@ -89,7 +89,7 @@ final class Ui
         return $h . '</div>';
     }
 
-    /** Text field. $o: label, icon, type, value, placeholder, help, error, attrs, textarea, suffix, class. */
+    /** Text field. $o: label, labelM (phone label when it differs), icon, type, value, placeholder, help, error, attrs, textarea, suffix, class. */
     public static function field(string $name, array $o = []): string
     {
         $id = $o['id'] ?? 'f-' . preg_replace('/\W+/', '-', $name);
@@ -102,7 +102,7 @@ final class Ui
             : '<input' . self::attrs($attrs) . '>';
         $cls = 'field' . (isset($o['error']) ? ' is-error' : '') . (isset($o['class']) ? ' ' . $o['class'] : '') . (($o['type'] ?? '') === 'search' ? ' field--search' : '');
         return '<div class="' . $cls . '">'
-            . (isset($o['label']) && $o['label'] !== '' ? '<label class="field__label" for="' . e($id) . '">' . e($o['label']) . '</label>' : '')
+            . (isset($o['label']) && $o['label'] !== '' ? '<label class="field__label" for="' . e($id) . '">' . (isset($o['labelM']) ? '<span class="only-desktop">' . e($o['label']) . '</span><span class="only-mobile">' . e($o['labelM']) . '</span>' : e($o['label'])) . '</label>' : '')
             . '<div class="field__box">' . (isset($o['icon']) ? icon($o['icon'], 20) : '') . $control
             . (isset($o['suffix']) ? '<span class="field__suffix">' . e($o['suffix']) . '</span>' : '') . '</div>'
             . (isset($o['error']) ? '<div class="field__help">' . e($o['error']) . '</div>' : (isset($o['help']) ? '<div class="field__help">' . e($o['help']) . '</div>' : ''))
