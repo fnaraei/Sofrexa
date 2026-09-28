@@ -15,9 +15,10 @@ final class Seed
 
     /** Bronze / Silver / Gold (design handoff §5): yearly-spend threshold in kuruş, discount %, earn %. */
     public const TIERS = [
-        ['Bronz', 0, 0, 5, 'attention'],
-        ['Gümüş', 1_000_000, 3, 7, 'neutral'],
-        ['Altın', 2_500_000, 5, 10, 'accent'],
+        // badge tones as on Figma CU5: Bronz neutral, Gümüş accent, Altın solid
+        ['Bronz', 0, 0, 5, 'Neutral'],
+        ['Gümüş', 1_000_000, 3, 7, 'Accent'],
+        ['Altın', 2_500_000, 5, 10, 'Solid'],
     ];
 
     /** Demo staff for development and training (names from the Figma screens). Never used in production. */

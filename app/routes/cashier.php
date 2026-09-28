@@ -11,6 +11,8 @@ $router->post('/cashier/pay/{id}', [C::class, 'payPost'], $p);
 $router->get('/cashier/pay/{id}/sheet/{kind}', [C::class, 'paySheet'], $p);
 $router->post('/cashier/pay/{id}/discount', [C::class, 'discount'], ['perm' => 'orders.discount']);
 $router->post('/cashier/pay/{id}/note', [C::class, 'note'], $p);
+$router->post('/cashier/pay/{id}/customer', [C::class, 'customer'], $p);
+$router->post('/cashier/pay/{id}/points', [C::class, 'points'], $p);
 $router->get('/cashier/customers', [C::class, 'customers'], $p);
 
 $router->get('/cashier/rates', [C::class, 'rates'], ['perm' => 'cash.rates']);

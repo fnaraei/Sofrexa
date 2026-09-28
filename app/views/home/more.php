@@ -12,6 +12,9 @@ $u = user();
     <?= Ui::lrow($label, ['icon' => $icon, 'href' => $href]) ?>
   <?php endforeach ?>
 </div>
+<?php if (can('customers.manage')): ?>
+<div class="list"><?= Ui::lrow(t('loy.title'), ['icon' => 'star', 'href' => '/customers/loyalty']) ?></div>
+<?php endif ?>
 <?php if (can('cash.pay')): ?>
 <div class="list">
   <?php if (can('cash.moves')): ?><?= Ui::lrow(t('cash.moves'), ['icon' => 'wallet', 'href' => '/cashier/moves']) ?><?php endif ?>

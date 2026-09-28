@@ -78,7 +78,7 @@ final class Audit
             str_starts_with($action, 'settings.') => ['audit.a.settings', 'info', 'settings'],
             str_starts_with($action, 'menu.') => ['audit.a.menu', 'info', 'utensils'],
             str_starts_with($action, 'stock.') => ['audit.a.stock', 'neutral', 'box'],
-            str_starts_with($action, 'loyalty.') || str_starts_with($action, 'customer.') => ['audit.a.customer', 'accent', 'star'],
+            str_starts_with($action, 'loyalty.') || str_starts_with($action, 'customer.') || str_starts_with($action, 'account.') || $action === 'order.customer' => ['audit.a.customer', 'accent', 'star'],
             str_starts_with($action, 'finance.') => ['audit.a.finance', 'info', 'wallet'],
             default => ['audit.a.other', 'neutral', 'info'],
         };

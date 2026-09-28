@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace Sofrexa\Modules\Orders;
 
 use Sofrexa\Core\{Db, Flash, HttpError, I18n, Money, Request, Response, ValidationError, View};
-use Sofrexa\Modules\Customers\Customers;
+use Sofrexa\Modules\Customers\{Customers, Loyalty};
 
 /** The till: C1/C8 open bills, C2/C3 payment, C6/C9 shift close, C7 rates, C10/C11 cash moves. */
 final class CashierController
@@ -108,12 +108,58 @@ final class CashierController
     {
         $o = Orders::editable($req->param('id'));
         $kind = $req->param('kind');
-        if (!in_array($kind, ['discount', 'note', 'bill', 'more'], true)) {
+        if (!in_array($kind, ['discount', 'note', 'bill', 'more', 'customer', 'points'], true)) {
             throw new HttpError(404);
         }
-        Response::json(['ok' => true, 'html' => View::partial('cashier/_sheet_' . $kind, [
-            'o' => $o, 'discountText' => self::discountText($o), 'vat' => Orders::vat($o['id']),
-        ])]);
+        $data = ['o' => $o, 'discountText' => self::discountText($o), 'vat' => Orders::vat($o['id']),
+            'customer' => $o['customer_id'] ? Customers::get($o['customer_id']) : null];
+        if ($kind === 'points') {
+            if (!$data['customer']) {
+                throw new HttpError(404);
+            }
+            $data += self::pointsView($o);
+        }
+        Response::json(['ok' => true, 'html' => View::partial('cashier/_sheet_' . $kind, $data)]);
+    }
+
+    /** Puts a customer on the bill or takes them off (tier / own discount follows, points used go back). */
+    public function customer(Request $req): void
+    {
+        $o = Orders::editable($req->param('id'));
+        $cid = $req->str('customer_id') ?: null;
+        if ($cid !== $o['customer_id']) {
+            Loyalty::attach($o['id'], $cid);
+        }
+        Response::json(['ok' => true, 'message' => I18n::t($cid ? 'pay.cust_added' : 'pay.cust_removed'), 'reload' => true]);
+    }
+
+    /** C12: use all / half of the usable points, or none (takes back what was used). */
+    public function points(Request $req): void
+    {
+        $o = Orders::editable($req->param('id'));
+        $v = self::pointsView($o);
+        $mode = $req->str('mode');
+        $n = match ($mode) { 'all' => $v['usable'], 'half' => intdiv($v['usable'], 2), default => 0 };
+        \Sofrexa\Core\Db::tx(static function () use ($o, $n): void {
+            Loyalty::unredeem($o['id']);
+            if ($n > 0) {
+                Loyalty::redeem($o['id'], $n);
+            }
+        });
+        Response::json(['ok' => true, 'message' => $n > 0 ? I18n::t('pay.points_used', ['n' => digits(I18n::num($n)), 'amount' => money($n * Loyalty::pointValue())]) : I18n::t('pay.points_kept'), 'reload' => true]);
+    }
+
+    /** What the C12 sheet needs: the bill before points, the usable points (as if none were used yet). */
+    private static function pointsView(array $o): array
+    {
+        $pv = Loyalty::pointValue();
+        $used = Loyalty::used($o['id']);
+        $base = max(0, (int) $o['total'] - (int) $o['paid'] + $used * $pv);
+        $avail = Loyalty::balance((string) $o['customer_id']) + $used;
+        $min = (int) \Sofrexa\Core\Settings::get('loyalty.min_redeem', 0);
+        $usable = $avail >= $min ? max(0, min($avail, intdiv($base, $pv))) : 0;
+        return ['pv' => $pv, 'used' => $used, 'base' => $base, 'avail' => $avail, 'usable' => $usable, 'min' => $min,
+            'tier' => Loyalty::tierOf((string) $o['customer_id']), 'earnPct' => Loyalty::earns($o) ? Loyalty::earnPct((string) $o['customer_id']) : 0.0];
     }
 
     public function discount(Request $req): void

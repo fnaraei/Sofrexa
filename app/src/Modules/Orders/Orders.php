@@ -34,7 +34,7 @@ final class Orders
             throw new HttpError(404);
         }
         $o['lines'] = self::lines($id);
-        $o['discounts'] = Db::rows('SELECT d.*, u.name AS user_name FROM order_discounts d LEFT JOIN users u ON u.id = d.user_id WHERE d.order_id = ? ORDER BY d.at', [$id]);
+        $o['discounts'] = Db::rows('SELECT d.*, u.name AS user_name FROM order_discounts d LEFT JOIN users u ON u.id = d.user_id WHERE d.order_id = ? ORDER BY d.at, d.rowid', [$id]);
         $o['payments'] = Db::rows('SELECT p.*, u.name AS user_name FROM payments p LEFT JOIN users u ON u.id = p.user_id WHERE p.order_id = ? ORDER BY p.at', [$id]);
         $o['delivery'] = json_arr($o['delivery']);
         $o['due'] = max(0, (int) $o['total'] - (int) $o['paid']);
@@ -486,9 +486,7 @@ final class Orders
                 \Sofrexa\Core\Sync::touch('order_items', $l['id']);
             }
         }
-        if (class_exists(\Sofrexa\Modules\Customers\Loyalty::class)) {
-            \Sofrexa\Modules\Customers\Loyalty::earn($orderId);
-        }
+        \Sofrexa\Modules\Customers\Loyalty::earn($orderId);
     }
 
     /** Cancels a whole open order with a reason (only when nothing was paid). */
@@ -512,6 +510,7 @@ final class Orders
         }
         Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim(($o['note'] ?? '') . ' · iptal: ' . $reason, ' ·')]);
         self::recalc($orderId);
+        \Sofrexa\Modules\Customers\Loyalty::refund($orderId);
         Audit::log('order.void', self::where($o) . ' · ' . Money::fmt((int) $o['total'], false, 'tr') . ' · sebep: ' . $reason, 'order', $orderId);
     }
 

@@ -92,6 +92,12 @@ final class I18n
         return ($lang ?? self::$lang) === 'fa' ? self::faDigits(str_replace(['.', ','], ['٬', '٫'], $s)) : $s;
     }
 
+    /** Like num(), with decimals only when there is a fraction: 5 → "5", 3.5 → "3,5". */
+    public static function numAuto(float $n, int $maxDecimals = 1): string
+    {
+        return self::num($n, abs($n - round($n)) < 0.001 ? 0 : $maxDecimals);
+    }
+
     public static function faDigits(string $s): string
     {
         return strtr($s, ['0' => '۰', '1' => '۱', '2' => '۲', '3' => '۳', '4' => '۴', '5' => '۵', '6' => '۶', '7' => '۷', '8' => '۸', '9' => '۹']);

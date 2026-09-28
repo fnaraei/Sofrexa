@@ -132,3 +132,77 @@
 
   render();
 })();
+
+/* Customer of the bill (search, new) and C12 loyalty points: all / half / keep with the live summary. */
+(function () {
+  'use strict';
+  const S = window.SOFREXA;
+  const group = n => {
+    const s = String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return S.lang === 'fa' ? S.digits(s.replace(/\./g, '٬')) : s;
+  };
+
+  function customerPicker(box) {
+    const order = box.dataset.order;
+    const q = S.$('[data-cust-q]', box);
+    const list = S.$('[data-cust-results]', box);
+    let timer = null;
+    let seq = 0;
+    q.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const term = q.value.trim();
+        const my = ++seq;
+        if (term.length < 2) { list.innerHTML = ''; return; }
+        const res = await S.api('/customers/search?q=' + encodeURIComponent(term), undefined, { quiet: true }).catch(() => ({ rows: [] }));
+        if (my !== seq) return;
+        list.innerHTML = '';
+        res.rows.forEach(r => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'pickrow';
+          b.dataset.post = '/cashier/pay/' + order + '/customer';
+          b.dataset.body = JSON.stringify({ customer_id: r.id });
+          b.innerHTML = '<span class="avatar avatar--s"></span><span class="col grow" style="gap:0;min-width:0"><span class="t-label-m ellipsis"></span><span class="t-body-s c-muted ellipsis"></span></span>';
+          b.querySelector('.avatar').textContent = r.name.split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+          b.querySelector('.t-label-m').textContent = r.name;
+          b.querySelector('.t-body-s').textContent = r.sub;
+          if (r.blacklist) b.classList.add('is-danger');
+          list.appendChild(b);
+        });
+        if (!res.rows.length) list.innerHTML = '<div class="empty">' + S.tr('js.no_customer') + '</div>';
+      }, 220);
+    });
+    const add = S.$('[data-cust-new]', box);
+    add.addEventListener('click', () => {
+      const term = q.value.trim();
+      const digits = term.replace(/\D+/g, '');
+      const key = digits.length >= 7 && digits.length >= term.replace(/\s+/g, '').length - 2 ? 'phone' : 'name';
+      S.loadSheet(add.dataset.custNew + (term ? '&' + key + '=' + encodeURIComponent(term) : ''));
+    });
+  }
+
+  function redeem(form) {
+    const cfg = JSON.parse(form.dataset.redeem);
+    const btn = S.$('[data-r-btn] span', form);
+    function render() {
+      const on = S.$('input[name=mode]:checked', form);
+      const amount = on ? Number(on.dataset.amount) : 0;
+      const pay = Math.max(0, cfg.base - amount);
+      const earn = cfg.earn > 0 ? Math.floor(Math.floor(pay * cfg.earn / 100) / cfg.pv) : 0;
+      S.$('[data-r-disc]', form).textContent = S.money(-amount);
+      S.$('[data-r-pay]', form).textContent = S.money(pay);
+      S.$('[data-r-earn]', form).textContent = '+' + cfg.str.points.replace('{n}', group(earn));
+      btn.textContent = amount > 0 ? cfg.str.apply.replace('{amount}', S.money(pay)) : cfg.str.keep;
+    }
+    form.addEventListener('change', render);
+    render();
+  }
+
+  document.addEventListener('sheet:loaded', e => {
+    const box = e.detail.querySelector('[data-cust-pick]');
+    if (box) customerPicker(box);
+    const f = e.detail.querySelector('[data-redeem]');
+    if (f) redeem(f);
+  });
+})();

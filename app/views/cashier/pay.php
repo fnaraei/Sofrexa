@@ -55,6 +55,9 @@ foreach ($currencies as $c) {
     }
     $curSegs .= '<label class="seg"><input type="radio" name="currency" value="' . e($c) . '"' . ($c === 'TRY' ? ' checked' : '') . '>' . e(Money::symbol($c) . ' ' . ($c === 'TRY' ? 'TL' : $c)) . '</label>';
 }
+$loyTier = $customer ? \Sofrexa\Modules\Customers\Loyalty::tierOf($customer['id']) : null;
+$loyPoints = $customer ? \Sofrexa\Modules\Customers\Loyalty::balance($customer['id']) : 0;
+$loyUsed = \Sofrexa\Modules\Customers\Loyalty::used($o['id']);
 $bottom = Ui::btn(t('pay.complete'), ['style' => 'accent', 'size' => 'l', 'icon' => 'check', 'attrs' => ['data-pay-submit' => true, 'disabled' => !$shift]]);
 ?>
 <?php if (!$shift): ?>
@@ -87,6 +90,16 @@ $bottom = Ui::btn(t('pay.complete'), ['style' => 'accent', 'size' => 'l', 'icon'
       <div class="row between end-a"><span class="t-number-xl num"><?= e(money($share)) ?></span><?php if ((int) $o['discount'] > 0): ?><span class="t-label-m c-accent"><?= e(t('order.discount') . ' ' . money(-(int) $o['discount'])) ?></span><?php endif ?></div>
     </div>
     <h2 class="t-heading-l only-desktop"><?= e(t('pay.title')) ?></h2>
+    <?php if ($customer): ?>
+      <div class="paywho">
+        <?= Ui::who($customer['name'], implode(' · ', array_filter([$loyTier['name'] ?? '', t('loy.points_n', ['n' => digits(\Sofrexa\Core\I18n::num($loyPoints))])]))) ?>
+        <span class="grow"></span>
+        <?php if ($loyPoints > 0 || $loyUsed > 0): ?><?= Ui::btn($loyUsed > 0 ? t('pay.pts_used_btn', ['n' => digits(\Sofrexa\Core\I18n::num($loyUsed))]) : t('pay.pts_use'), ['style' => 'secondary', 'size' => 's', 'icon' => 'sparkles', 'attrs' => ['data-load-sheet' => '/cashier/pay/' . $o['id'] . '/sheet/points']]) ?><?php endif ?>
+        <?= Ui::ibtn('pencil', t('pay.cust_t'), ['style' => 'ghost', 'class' => 'ibtn--s', 'attrs' => ['data-load-sheet' => '/cashier/pay/' . $o['id'] . '/sheet/customer']]) ?>
+      </div>
+    <?php else: ?>
+      <button type="button" class="paywho paywho--add" data-load-sheet="/cashier/pay/<?= e($o['id']) ?>/sheet/customer"><?= icon('user-plus', 20) ?><span class="grow t-label-m"><?= e(t('pay.cust_add')) ?></span><span class="t-body-s c-muted only-desktop"><?= e(t('pay.cust_add_s')) ?></span></button>
+    <?php endif ?>
     <?php if ($persons >= 2): ?>
       <div class="payshare">
         <?= icon('users', 20) ?><span class="grow t-label-m"><?= e(t('pay.per_person', ['amount' => money($share)])) ?></span><span class="t-body-s c-muted"><?= e(t('pay.paid_n', ['n' => digits($done), 't' => digits($persons)])) ?></span>
