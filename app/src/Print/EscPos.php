@@ -20,7 +20,7 @@ final class EscPos
 
     public static function encode(string $s): string
     {
-        $s = strtr($s, ['₺' => 'TL', '—' => '-', '–' => '-', '·' => '-', '…' => '...', '“' => '"', '”' => '"', '’' => "'", '×' => 'x', '→' => '>', '−' => '-']);
+        $s = strtr($s, ['₺' => 'TL', '—' => '-', '–' => '-', '…' => '...', '“' => '"', '”' => '"', '’' => "'", '→' => '>', '−' => '-']);
         $out = @iconv('UTF-8', 'CP857//TRANSLIT//IGNORE', $s);
         return $out === false ? preg_replace('/[^\x20-\x7E]/', '?', $s) ?? '' : $out;
     }
