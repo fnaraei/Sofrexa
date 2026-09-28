@@ -68,13 +68,13 @@ return [
         same(4.5, Stock::onHand($meat));
         $list = Stock::shoppingList();
         same('Kıyma', $list['Et Dünyası'][0]['name']);
-        same(5.5, (float) $list['Et Dünyası'][0]['suggest'], 'up to twice the minimum');
+        same(6.0, (float) $list['Et Dünyası'][0]['suggest'], 'up to twice the minimum, whole kilos');
     },
 
     'purchase paid in cash from the till leaves the drawer' => function () use ($setup): void {
         ['meat' => $meat, 'sup' => $sup] = $setup();
         Shifts::open(['TRY' => 100000]);
         Stock::document('purchase', [['stock_item_id' => $meat, 'qty' => '2', 'unit_price' => '400']], ['supplier_id' => $sup, 'pay_method' => 'cash', 'doc_no' => 'F-12']);
-        same(100000 - 80000, (int) Shifts::summary(Shifts::currentId())['cash']['TRY']);
+        same(100000 - 88000, (int) Shifts::summary(Shifts::currentId())['cash']['TRY'], '₺800 + 10% VAT');
     },
 ];

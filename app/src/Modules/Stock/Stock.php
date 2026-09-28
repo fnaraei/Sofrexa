@@ -12,8 +12,21 @@ use Sofrexa\Core\{Audit, Auth, Clock, Db, I18n, Money, ValidationError};
  */
 final class Stock
 {
-    public const UNITS = ['kg', 'g', 'lt', 'ml', 'adet', 'paket', 'kutu'];
+    public const UNITS = ['kg', 'g', 'lt', 'ml', 'adet', 'porsiyon', 'paket', 'kutu'];
     public const MAX_DEPTH = 5;
+
+    /** "6,2", "38", "0,15" — Turkish decimals, no trailing zeros (Persian digits for fa). */
+    public static function qty(float $q): string
+    {
+        $dec = abs($q - round($q)) < 0.0005 ? 0 : (abs($q * 10 - round($q * 10)) < 0.005 ? 1 : (abs($q * 100 - round($q * 100)) < 0.05 ? 2 : 3));
+        return I18n::num($q, $dec);
+    }
+
+    /** Units as on the designs: "L" for litres. */
+    public static function unitLabel(string $unit): string
+    {
+        return $unit === 'lt' ? 'L' : $unit;
+    }
 
     // ------------------------------------------------------------ reading
 
@@ -27,7 +40,8 @@ final class Stock
         $out = [];
         foreach ($rows as $r) {
             $r['on_hand'] = round((float) $r['on_hand'], 3);
-            $r['state'] = $r['on_hand'] <= 0 ? 'out' : ($r['on_hand'] < (float) $r['min_qty'] ? 'low' : 'ok');
+            // a semi-finished item made from its recipe on demand has no stock of its own
+            $r['state'] = $r['kind'] === 'semi' && (float) $r['min_qty'] <= 0 && $r['on_hand'] <= 0 ? 'ok' : self::state($r['on_hand'], (float) $r['min_qty']);
             $r['value'] = (int) round(max(0, $r['on_hand']) * (float) $r['avg_cost']);
             if (($f['q'] ?? '') !== '' && !str_contains(mb_strtolower($r['name'], 'UTF-8'), mb_strtolower((string) $f['q'], 'UTF-8'))) {
                 continue;
@@ -38,9 +52,49 @@ final class Stock
             if (($f['state'] ?? '') !== '' && ($f['state'] === 'alert' ? $r['state'] === 'ok' : $r['state'] !== $f['state'])) {
                 continue;
             }
+            if (($f['location'] ?? '') !== '' && (string) $r['location'] !== $f['location']) {
+                continue;
+            }
             $out[] = $r;
         }
+        // critical first, then low, then the rest by name (as on S1)
+        $rank = ['critical' => 0, 'low' => 1, 'ok' => 2];
+        usort($out, static fn(array $a, array $b): int => [$rank[$a['state']], mb_strtolower($a['name'], 'UTF-8')] <=> [$rank[$b['state']], mb_strtolower($b['name'], 'UTF-8')]);
         return $out;
+    }
+
+    /** Kritik: under the minimum (or nothing left); Az: less than a quarter above the minimum; else Yeterli. */
+    public static function state(float $onHand, float $min): string
+    {
+        if ($onHand <= 0 || $onHand < $min) {
+            return 'critical';
+        }
+        return $min > 0 && $onHand < $min * 1.25 ? 'low' : 'ok';
+    }
+
+    public static function locations(): array
+    {
+        // the place with the most items first (Soğuk oda before Bar)
+        return array_column(Db::rows("SELECT location, COUNT(*) AS n FROM stock_items WHERE deleted = 0 AND location IS NOT NULL AND location <> '' GROUP BY location ORDER BY n DESC, location"), 'location');
+    }
+
+    /** S1 KPIs: stock value, critical items, today's use by sales and waste vs yesterday, the last count. */
+    public static function kpis(array $items): array
+    {
+        $rollover = (int) \Sofrexa\Core\Settings::get('day.rollover_hour', 5);
+        [$from, $to] = Clock::dayRange(\Sofrexa\Modules\Orders\Orders::businessDay(), $rollover);
+        $use = static fn(int $a, int $b): int => (int) round(-(float) Db::value("SELECT COALESCE(SUM(qty * unit_cost), 0) FROM stock_moves WHERE at >= ? AND at < ? AND (reason IN ('sale', 'void') OR reason LIKE 'waste%')", [$a, $b]));
+        $last = Db::row("SELECT id, at FROM stock_docs WHERE kind = 'count' ORDER BY at DESC LIMIT 1");
+        $lastDiff = $last ? (int) round((float) Db::value("SELECT COALESCE(SUM(qty * unit_cost), 0) FROM stock_moves WHERE doc_id = ?", [$last['id']])) : 0;
+        $critical = array_values(array_filter($items, static fn(array $r): bool => $r['state'] === 'critical' && $r['active']));
+        return [
+            'value' => (int) array_sum(array_column($items, 'value')),
+            'critical' => $critical,
+            'today' => $use($from, $to),
+            'yesterday' => $use($from - 86_400_000, $to - 86_400_000),
+            'last_count' => $last ? (int) $last['at'] : null,
+            'last_diff' => $lastDiff,
+        ];
     }
 
     public static function item(string $id): array
@@ -87,6 +141,8 @@ final class Stock
             'name' => mb_substr($name, 0, 120), 'unit' => $unit, 'category' => trim((string) ($in['category'] ?? '')) ?: null,
             'kind' => ($in['kind'] ?? '') === 'semi' ? 'semi' : 'raw', 'min_qty' => max(0, (float) str_replace(',', '.', (string) ($in['min_qty'] ?? 0))),
             'supplier_id' => ($in['supplier_id'] ?? '') ?: null, 'active' => isset($in['active']) ? (int) (bool) $in['active'] : 1,
+            'location' => trim((string) ($in['location'] ?? '')) ?: null,
+            'vat_rate' => max(0, (float) str_replace(',', '.', (string) ($in['vat_rate'] ?? 10))),
         ];
         if (isset($in['avg_cost']) && $in['avg_cost'] !== '') {
             $row['avg_cost'] = Money::parse($in['avg_cost']);
@@ -121,11 +177,13 @@ final class Stock
     {
         $kind = $kind === 'stock' ? 'stock' : 'item';
         $clean = [];
+        $waste = [];
         foreach ($lines as $l) {
             $sid = (string) ($l['stock_item_id'] ?? $l[0] ?? '');
             $qty = (float) str_replace(',', '.', (string) ($l['qty'] ?? $l[1] ?? 0));
             if ($sid !== '' && $qty > 0) {
                 $clean[$sid] = ($clean[$sid] ?? 0) + $qty;
+                $waste[$sid] = max(0, min(90, (float) str_replace(',', '.', (string) ($l['waste_pct'] ?? 0))));
             }
         }
         if ($kind === 'stock') {
@@ -135,14 +193,15 @@ final class Stock
                 }
             }
         }
-        Db::tx(static function () use ($kind, $parentId, $clean): void {
+        Db::tx(static function () use ($kind, $parentId, $clean, $waste): void {
             foreach (Db::rows('SELECT id FROM recipes WHERE parent_kind = ? AND parent_id = ? AND deleted = 0', [$kind, $parentId]) as $r) {
                 Db::softDelete('recipes', $r['id']);
             }
             foreach ($clean as $sid => $qty) {
-                Db::save('recipes', ['parent_kind' => $kind, 'parent_id' => $parentId, 'stock_item_id' => $sid, 'qty' => round($qty, 4)]);
+                Db::save('recipes', ['parent_kind' => $kind, 'parent_id' => $parentId, 'stock_item_id' => $sid, 'qty' => round($qty, 6), 'waste_pct' => $waste[$sid] ?? 0]);
             }
         });
+        Audit::log('stock.recipe', ($kind === 'item' ? tn(Db::value('SELECT names FROM items WHERE id = ?', [$parentId]) ?? '{}', 'tr') : (string) Db::value('SELECT name FROM stock_items WHERE id = ?', [$parentId])) . ' · ' . count($clean) . ' malzeme', $kind === 'item' ? 'item' : 'stock_item', $parentId);
         if ($kind === 'item') {
             self::refreshItemCost($parentId);
         } else {
@@ -272,17 +331,21 @@ final class Stock
                 continue;
             }
             $price = $kind === 'purchase' ? (isset($l['total']) && $l['total'] !== '' ? Money::parse($l['total']) / $qty : Money::parse($l['unit_price'] ?? 0)) : self::unitCost($l['stock_item_id']);
-            $clean[] = ['id' => (string) $l['stock_item_id'], 'qty' => $qty, 'price' => (float) $price, 'reason' => trim((string) ($l['reason'] ?? ''))];
+            $vatRate = isset($l['vat']) && $l['vat'] !== '' ? (float) str_replace(',', '.', (string) $l['vat']) : (float) Db::value('SELECT vat_rate FROM stock_items WHERE id = ?', [$l['stock_item_id']]);
+            $clean[] = ['id' => (string) $l['stock_item_id'], 'qty' => $qty, 'price' => (float) $price, 'vat' => $kind === 'purchase' ? max(0, $vatRate) : 0, 'reason' => trim((string) ($l['reason'] ?? ''))];
         }
         if (!$clean) {
             throw new ValidationError(['lines' => I18n::t('stock.err_lines')]);
         }
-        $total = (int) round(array_sum(array_map(static fn(array $l): float => $l['qty'] * $l['price'], $clean)));
+        // purchase prices are without VAT (the stock cost); the invoice total adds the VAT
+        $net = (int) round(array_sum(array_map(static fn(array $l): float => $l['qty'] * $l['price'], $clean)));
+        $vat = (int) round(array_sum(array_map(static fn(array $l): float => $l['qty'] * $l['price'] * $l['vat'] / 100, $clean)));
+        $total = $net + $vat;
         $u = Auth::user();
         $now = Clock::ms();
-        $docId = Db::tx(static function () use ($kind, $clean, $head, $total, $u, $now): string {
+        $docId = Db::tx(static function () use ($kind, $clean, $head, $total, $vat, $u, $now): string {
             $doc = Db::append('stock_docs', ['kind' => $kind, 'supplier_id' => ($head['supplier_id'] ?? '') ?: null, 'doc_no' => trim((string) ($head['doc_no'] ?? '')) ?: null,
-                'day' => ($head['day'] ?? '') ?: \Sofrexa\Modules\Orders\Orders::businessDay(), 'total' => $total, 'pay_method' => ($head['pay_method'] ?? '') ?: null,
+                'day' => ($head['day'] ?? '') ?: \Sofrexa\Modules\Orders\Orders::businessDay(), 'total' => $total, 'vat' => $vat, 'pay_method' => ($head['pay_method'] ?? '') ?: null,
                 'note' => trim((string) ($head['note'] ?? '')) ?: null, 'user_id' => $u['id'] ?? null, 'at' => $now]);
             foreach ($clean as $l) {
                 if ($kind === 'purchase') {
@@ -350,6 +413,9 @@ final class Stock
                 continue;
             }
             $suggest = max(0, (float) $r['min_qty'] * 2 - max(0, $r['on_hand']));
+            // order in whole kilos / litres / pieces, grams and millilitres by ten
+            $step = in_array($r['unit'], ['g', 'ml'], true) ? 10 : 1;
+            $suggest = ceil($suggest / $step) * $step;
             $key = $r['supplier_name'] ?? '';
             $out[$key][] = $r + ['suggest' => round($suggest, 2)];
         }

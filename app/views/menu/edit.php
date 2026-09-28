@@ -42,6 +42,7 @@ $status = $isNew ? '' : ($i['soldout'] ? Ui::badge(t('quick.s_out'), 'danger', t
       <?php if (!$isNew): ?><p class="t-body-m c-muted"><?= e($catName . ($i['changed'] ? ' · ' . t('menu.last_change', ['when' => mb_strtolower(when_label((int) $i['changed']['at'])), 'who' => explode(' ', (string) $i['changed']['name'])[0]]) : '')) ?></p><?php endif ?>
     </div>
     <?= $status ?>
+    <?php if (!$isNew && can('stock.manage')): ?><?= Ui::btn(t('stock.recipe_btn'), ['style' => 'secondary', 'icon' => 'layers', 'href' => '/stock/recipe/item/' . $i['id']]) ?><?php endif ?>
   </div>
 
   <div class="itemgrid">
@@ -144,6 +145,7 @@ $status = $isNew ? '' : ($i['soldout'] ? Ui::badge(t('quick.s_out'), 'danger', t
     <?= Ui::sheetHead(tn($names)) ?>
     <div class="sheet__body">
       <?= Ui::select('category_id_m', array_map(static fn(array $c): string => tn($c['names']), $catMap), (string) $i['category_id'], ['label' => t('menu.category'), 'icon' => 'layers', 'attrs' => ['data-mirror-select' => 'category_id']]) ?>
+      <?php if (can('stock.manage')): ?><?= Ui::btn(t('stock.recipe_btn'), ['style' => 'secondary', 'size' => 'l', 'block' => true, 'icon' => 'layers', 'href' => '/stock/recipe/item/' . $i['id']]) ?><?php endif ?>
       <?= Ui::btn(t('menu.delete_item'), ['style' => 'danger', 'size' => 'l', 'block' => true, 'icon' => 'trash', 'attrs' => ['data-post' => '/menu/items/' . $i['id'] . '/delete', 'data-confirm' => t('menu.delete_confirm', ['name' => tn($names)])]]) ?>
     </div>
   </div>
