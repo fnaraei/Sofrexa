@@ -14,6 +14,7 @@ $router->post('/cashier/pay/{id}/discount', [C::class, 'discount'], ['perm' => '
 $router->post('/cashier/pay/{id}/note', [C::class, 'note'], $p);
 $router->post('/cashier/pay/{id}/customer', [C::class, 'customer'], $p);
 $router->post('/cashier/pay/{id}/points', [C::class, 'points'], $p);
+$router->post('/cashier/pay/{id}/refund', [C::class, 'refund'], $p); // C2c / C3c: more was paid than the bill
 $router->get('/cashier/customers', [C::class, 'customers'], $p);
 
 // cancelled dishes of the kitchen (IP1–IP4): the till's answer, waste, another bill, a staff member

@@ -248,7 +248,7 @@
      anywhere unlocks it, and a screen wake lock keeps the phone awake while the app is in front. */
   const serves = !!(S.user && S.user.serves);
   const Ring = {
-    ctx: null, lock: null, open: null, timer: null, left: 0,
+    ctx: null, lock: null, open: null, shown: null, lines: [], timer: null,
     on() { try { return localStorage.getItem('sfx-alert') !== 'off'; } catch (e) { return true; } },
     unlock() {
       try {
@@ -284,15 +284,21 @@
         this.lock.addEventListener('release', () => { this.lock = null; });
       } catch (e) { /* the browser said no; the phone just dims as usual */ }
     },
-    /** The alerts the server sent: ring about the oldest one, and drop the card once it is handled. */
+    /**
+     * The alerts the server sent: ring about the oldest one, and drop the card once it is handled. The server keeps
+     * one alert per table and adds plates to it, so the card is drawn again whenever its version changes — otherwise
+     * a plate that joined an open alert would never be seen.
+     */
     sync(list) {
       const a = list[0];
       if (!a) return this.close();
-      if (a.id !== this.open) this.show(a);
+      if (a.id + ':' + a.rev !== this.shown) this.show(a);
     },
     show(a) {
       this.close();
       this.open = a.id;
+      this.shown = a.id + ':' + a.rev;
+      this.lines = a.lines || [];
       const ready = a.kind !== 'qr';
       const mins = Math.floor((Date.now() - a.at) / 60000);
       const rows = (a.items || []).map(i =>
@@ -313,16 +319,23 @@
         + '</div></div>';
       document.body.appendChild(el);
       this.el = el;
-      this.left = 20; // about three minutes of ringing, then the card waits quietly
-      this.chime();
-      this.timer = setInterval(() => { if (--this.left > 0) this.chime(); else this.stop(); }, 8000);
+      this.ring(0);
       this.wake();
     },
-    stop() { if (this.timer) { clearInterval(this.timer); this.timer = null; } },
+    /**
+     * It rings until the waiter answers: every 8 s for the first two minutes, then every 30 s, so a plate is never
+     * forgotten but a phone left on a tray does not chime without pause all evening.
+     */
+    ring(n) {
+      this.chime();
+      this.timer = setTimeout(() => this.ring(n + 1), n < 15 ? 8000 : 30000);
+    },
+    stop() { if (this.timer) { clearTimeout(this.timer); this.timer = null; } },
     close() {
       this.stop();
       if (this.el) { this.el.remove(); this.el = null; }
       this.open = null;
+      this.shown = null;
     },
     /**
      * "Aldım": the waiter is going for the plates, so the alert is handled and the card goes.
@@ -333,8 +346,10 @@
       const id = this.open;
       if (!id) return;
       const review = act === 'done' && this.el && this.el.classList.contains('ralert--qr');
+      // "Aldım" names the plates that were on the screen: one the kitchen added a moment ago is not handed over unseen
+      const body = act === 'done' && !review ? { lines: this.lines } : {};
       this.close();
-      try { await S.api('/my/notifications/' + id + '/' + (act === 'done' && !review ? 'done' : 'later'), {}, { quiet: true }); } catch (e) { /* the next poll tries again */ }
+      try { await S.api('/my/notifications/' + id + '/' + (act === 'done' && !review ? 'done' : 'later'), body, { quiet: true }); } catch (e) { /* the next poll tries again */ }
       if (review) { location.href = '/my/notifications'; return; }
       pollStatus();
     },

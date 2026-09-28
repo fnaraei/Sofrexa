@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Sofrexa\Modules\Orders;
 
-use Sofrexa\Core\{Clock, Db};
+use Sofrexa\Core\{Clock, Db, Perms};
 use Sofrexa\Modules\Staff\Staff;
 
 /**
@@ -23,11 +23,16 @@ final class Assign
     /** A plate waiting to be carried out weighs this many open tables. */
     private const READY_WEIGHT = 3;
 
+    /** What the waiter who gets a guest order must be allowed to do with it: take it, and approve a new phone's first order. */
+    public const GUEST_PERMS = ['orders.take', 'orders.qr_approve'];
+
     /**
-     * Everyone on shift who can take orders, lightest load first.
+     * Everyone on shift who may handle a guest order, lightest load first. Somebody who may take orders but not approve
+     * a QR order would be sent an alert they cannot act on, so they are left out; with nobody left, the caller alerts
+     * the whole role instead.
      * @return list<array{id:string,name:string,role:string,ready:int,tables:int,load:int,since:int}>
      */
-    public static function online(): array
+    public static function online(array $need = self::GUEST_PERMS): array
     {
         $ids = array_map('strval', array_keys(Staff::onShift()));
         if (!$ids) {
@@ -36,7 +41,7 @@ final class Assign
         $rows = Db::rows('SELECT u.id, u.name, r.code AS role, r.perms AS role_perms, u.perms_allow, u.perms_deny
             FROM users u JOIN roles r ON r.id = u.role_id
             WHERE u.active = 1 AND u.deleted = 0 AND u.id IN (' . Db::in($ids) . ')', $ids);
-        $able = array_values(array_filter($rows, static fn(array $r): bool => self::takesOrders($r)));
+        $able = array_values(array_filter($rows, static fn(array $r): bool => self::may($r, $need)));
         // waiters do this job; anyone else who may take orders stands in only when no waiter is on shift
         if ($only = array_values(array_filter($able, static fn(array $r): bool => $r['role'] === 'waiter'))) {
             $able = $only;
@@ -49,7 +54,8 @@ final class Assign
         $ready = Db::pairs("SELECT o.waiter_id, CAST(ROUND(SUM(i.qty)) AS INTEGER) FROM order_items i JOIN orders o ON o.id = i.order_id
             WHERE i.status = 'ready' AND i.deleted = 0 AND o.deleted = 0 AND o.waiter_id IN (" . Db::in($mine) . ')
             GROUP BY o.waiter_id', $mine);
-        $tables = Db::pairs("SELECT waiter_id, COUNT(*) FROM orders
+        // tables, not bills: a table whose bill was split is still one table to look after
+        $tables = Db::pairs("SELECT waiter_id, COUNT(DISTINCT table_id) FROM orders
             WHERE status IN ('open', 'billed') AND deleted = 0 AND table_id IS NOT NULL AND waiter_id IN (" . Db::in($mine) . ')
             GROUP BY waiter_id', $mine);
         $last = Db::pairs('SELECT waiter_id, MAX(COALESCE(assigned_at, opened_at)) FROM orders
@@ -87,14 +93,13 @@ final class Assign
         return $userId;
     }
 
-    /** Whether a role (plus the person's own extra and removed permissions) may take orders. */
-    private static function takesOrders(array $r): bool
+    /** Whether a person has every permission in $need: their role's plus their own extras, minus the ones taken away (as Auth::can). */
+    private static function may(array $r, array $need): bool
     {
-        $perms = [...json_arr((string) ($r['role_perms'] ?? '[]')), ...json_arr((string) ($r['perms_allow'] ?? '[]'))];
+        $perms = Perms::expand(array_values(array_unique([...json_arr((string) ($r['role_perms'] ?? '[]')), ...json_arr((string) ($r['perms_allow'] ?? '[]'))])));
         if (in_array('*', $perms, true)) {
             return true;
         }
-        $deny = json_arr((string) ($r['perms_deny'] ?? '[]'));
-        return in_array('orders.take', $perms, true) && !in_array('orders.take', $deny, true);
+        return !array_diff($need, array_diff($perms, json_arr((string) ($r['perms_deny'] ?? '[]'))));
     }
 }

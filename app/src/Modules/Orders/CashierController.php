@@ -48,6 +48,8 @@ final class CashierController
             'nav' => 'cashier',
             'o' => $o,
             'due' => $due,
+            // C2c / C3c: the bill came down below what was already paid — the screen offers the refund instead
+            'over' => max(0, (int) $o['paid'] - (int) $o['total']),
             'share' => min($share, $due),
             'persons' => $persons,
             'done' => $done,
@@ -114,6 +116,16 @@ final class CashierController
         $msg = $r['change'] > 0 ? I18n::t('pay.done', ['change' => money($r['change'])]) : I18n::t('pay.partial', ['due' => money($r['due'])]);
         Flash::set('success', $msg);
         Response::json(['ok' => true, 'change' => $r['change'], 'redirect' => '/cashier/pay/' . $o['id'] . ($persons > 1 ? '?persons=' . $persons . '&k=' . ($req->int('k') + 1) : '')]);
+    }
+
+    /** C2c / C3c "İade et ve kapat": the overpaid difference goes back (drawer or card machine) and the bill closes. */
+    public function refund(Request $req): void
+    {
+        $o = Orders::editable($req->param('id'));
+        $amount = Orders::refund($o['id'], $req->str('method'), $req->bool('receipt'));
+        Notify::closeFor($o['id']);
+        Flash::set('success', I18n::t('pay.over_done', ['amount' => money($amount)]));
+        Response::json(['ok' => true, 'redirect' => '/cashier']);
     }
 
     /** Sheets of the payment screen: discount, receipt note, the bill (phone), more actions (phone). */

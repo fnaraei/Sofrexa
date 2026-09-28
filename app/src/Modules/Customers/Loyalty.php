@@ -432,6 +432,24 @@ final class Loyalty
         }
     }
 
+    /**
+     * A bill that used points is merged into another: its point discount now sits on that bill, so the points go with
+     * it — given back on the first bill and used on the second, the balance untouched. Taking the discount off the
+     * merged bill (or cancelling it) then gives them back to the customer exactly once.
+     */
+    public static function moveRedemptions(string $fromId, string $intoId): void
+    {
+        $uid = Auth::user()['id'] ?? null;
+        foreach (Db::rows("SELECT customer_id, SUM(points) AS p FROM loyalty_ledger WHERE order_id = ? AND kind IN ('redeem', 'refund') GROUP BY customer_id", [$fromId]) as $r) {
+            if ((int) $r['p'] >= 0) {
+                continue;
+            }
+            $at = Clock::ms();
+            Db::append('loyalty_ledger', ['customer_id' => $r['customer_id'], 'points' => -(int) $r['p'], 'kind' => 'refund', 'order_id' => $fromId, 'note' => 'birleştirme', 'at' => $at, 'user_id' => $uid]);
+            Db::append('loyalty_ledger', ['customer_id' => $r['customer_id'], 'points' => (int) $r['p'], 'kind' => 'redeem', 'order_id' => $intoId, 'note' => 'birleştirme', 'at' => $at, 'user_id' => $uid]);
+        }
+    }
+
     /** Manager correction (+/−). */
     public static function adjust(string $customerId, int $points, string $note): void
     {

@@ -162,6 +162,18 @@ final class Router
 
     private array $routes = [];
 
+    /**
+     * Refuses the till's work on a web copy that is not standing in for the PC (409). The router applies it to every
+     * POST whose permission is a till one; an action reached another way — a notification's button, the kitchen TV's
+     * link — calls it itself for the actions that are till work, so no second door skips the rule.
+     */
+    public static function tillOnly(): void
+    {
+        if (!\Sofrexa\Modules\QrOrder\QrOrders::owner()) {
+            throw new HttpError(409, I18n::t('err.till_only'));
+        }
+    }
+
     /** $opts: auth (staff login required, default true), perm (permission code), csrf (default true for POST). */
     public function add(string $method, string $pattern, callable|array $handler, array $opts = []): void
     {
@@ -196,8 +208,8 @@ final class Router
             if (!empty($opts['perm']) && !Auth::can($opts['perm'])) {
                 throw new HttpError(403, I18n::t('err.forbidden'));
             }
-            if ($req->method === 'POST' && in_array($opts['perm'] ?? '', self::TILL_PERMS, true) && !\Sofrexa\Modules\QrOrder\QrOrders::owner()) {
-                throw new HttpError(409, I18n::t('err.till_only'));
+            if ($req->method === 'POST' && in_array($opts['perm'] ?? '', self::TILL_PERMS, true)) {
+                self::tillOnly();
             }
             if (is_array($handler)) {
                 [$class, $fn] = $handler;

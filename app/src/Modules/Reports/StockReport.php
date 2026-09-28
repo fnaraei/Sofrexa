@@ -31,10 +31,12 @@ final class StockReport
         $rows = [];
         foreach (Stock::items() as $s) {
             $r = $m[$s['id']] ?? null;
-            if (!$r && (float) $s['on_hand'] == 0.0) {
+            $end = (float) $s['on_hand'] - (float) ($after[$s['id']] ?? 0);
+            // an item belongs in the period's report when it moved in the period or was on the shelf at its end (and so
+            // at its start) — what is on the shelf today says nothing about last month
+            if (!$r && abs($end) < 0.0005) {
                 continue;
             }
-            $end = (float) $s['on_hand'] - (float) ($after[$s['id']] ?? 0);
             $in = (float) ($r['inn'] ?? 0);
             $sale = (float) ($r['sale'] ?? 0);
             $waste = (float) ($r['waste'] ?? 0);

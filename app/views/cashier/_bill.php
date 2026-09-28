@@ -28,10 +28,12 @@ if (count($vat) === 1) {
   <?php if ((int) $o['discount'] > 0): ?>
     <div class="kv"><span><?= e(t('pay.discount_line', ['desc' => $discountText])) ?></span><span class="num c-success"><?= e(money(-(int) $o['discount'])) ?></span></div>
   <?php endif ?>
-  <?php if ((int) $o['paid'] > 0): ?>
+  <?php // overpaid (C2c): the bill shows what it comes to; the payment panel beside it shows what was paid and what goes back
+    $overpaid = (int) $o['paid'] > (int) $o['total']; ?>
+  <?php if ((int) $o['paid'] > 0 && !$overpaid): ?>
     <div class="kv"><span><?= e(t('pay.paid_before')) ?></span><span class="num c-success"><?= e(money(-(int) $o['paid'])) ?></span></div>
   <?php endif ?>
-  <div class="kv kv--xl"><span><?= e(t('pay.total')) ?></span><span class="num"><?= e(money((int) $o['total'] - (int) $o['paid'])) ?></span></div>
+  <div class="kv kv--xl"><span><?= e(t('pay.total')) ?></span><span class="num"><?= e(money($overpaid ? (int) $o['total'] : (int) $o['total'] - (int) $o['paid'])) ?></span></div>
   <?php if ($vatText !== ''): ?><div class="kv kv--s"><span><?= e($vatText) ?></span><span class="num"><?= e(money($vatSum)) ?></span></div><?php endif ?>
   <?php if (!empty($o['receipt_note'])): ?><div class="t-body-s c-muted"><?= icon('note', 14) ?> <?= e($o['receipt_note']) ?></div><?php endif ?>
 </div>

@@ -132,7 +132,7 @@ final class Orders
         }
         $qty = max(0.5, min(99, $qty));
         // the daily stock counts what was sent and what is waiting unsent in any bill (it is sent later)
-        if ($item['left'] !== null && $qty > ($left = max(0, $item['left'] - Menu::reserved($itemId)))) {
+        if ($item['left'] !== null && $qty > ($left = Menu::left($item['left'] - Menu::reserved($itemId))) + 0.0001) {
             throw new \InvalidArgumentException(I18n::t('order.err_stock', ['name' => tn($item['names']), 'n' => I18n::numAuto($left)]));
         }
         [$modRows, $modsPrice] = self::mods($itemId, $mods);
@@ -280,8 +280,8 @@ final class Orders
         }
         $sold = Menu::soldToday();
         foreach ($capped as $i) {
-            $left = max(0, (int) $i['daily_stock'] - (int) floor($sold[$i['id']] ?? 0));
-            if ($want[$i['id']] > $left) {
+            $left = Menu::left((float) $i['daily_stock'] - (float) ($sold[$i['id']] ?? 0));
+            if ($want[$i['id']] > $left + 0.0001) {
                 throw new \InvalidArgumentException(I18n::t('order.err_stock', ['name' => tn($i['names']), 'n' => I18n::numAuto($left)]));
             }
         }
@@ -458,6 +458,11 @@ final class Orders
         }
         $amount = $kind === 'pct' ? (int) round((int) $o['subtotal'] * $value / 100) : (int) round($value);
         $amount = min($amount, max(0, (int) $o['subtotal'] - (int) $o['discount']));
+        // money already taken is not given back by a discount: the bill may not drop below what was paid (a dish cancelled
+        // after a part payment is settled by an explicit refund on the payment screen instead)
+        if ((int) $o['paid'] > 0 && (int) $o['total'] - $amount < (int) $o['paid']) {
+            throw new ValidationError(['value' => I18n::t('order.err_discount_paid', ['paid' => Money::fmt((int) $o['paid'])])]);
+        }
         Db::append('order_discounts', ['order_id' => $orderId, 'kind' => $kind, 'value' => $value, 'amount' => $amount, 'reason' => mb_substr($reason, 0, 120) ?: null, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
         self::recalc($orderId);
         Audit::log('order.discount', self::where($o) . ' · ' . ($kind === 'pct' ? '%' . I18n::num($value, 0, 'tr') : Money::fmt((int) $value, false, 'tr')) . ' · ' . Money::fmt($amount, false, 'tr') . ($reason !== '' ? ' · ' . $reason : ''), 'order', $orderId);
@@ -482,8 +487,9 @@ final class Orders
     // ------------------------------------------------------------ tables
 
     /**
-     * Moves a table's bill to another (free) table — together with the bills split off it and the one it was split from,
-     * in one step, so a family of bills never ends up on two tables.
+     * Moves a table's bill to another (free) table — together with every open bill of its family, in one step, so a
+     * family of bills never ends up on two tables: the first bill of the table and every bill split off it, however
+     * many times over (a bill split off a split bill too), whichever of them the move started from.
      */
     public static function moveTable(string $orderId, string $tableId): void
     {
@@ -492,9 +498,7 @@ final class Orders
         if ($to === null) {
             throw new HttpError(404);
         }
-        $root = $o['parent_id'] ?: $o['id'];
-        $family = array_column(Db::rows("SELECT id FROM orders WHERE (id = ? OR parent_id = ?) AND status IN ('pending', 'open', 'billed') AND deleted = 0", [$root, $root]), 'id');
-        $family = array_values(array_unique([...$family, $orderId]));
+        $family = array_values(array_unique([...self::family($orderId), $orderId]));
         Db::tx(static function () use ($family, $tableId): void {
             if (Db::value("SELECT 1 FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 AND id NOT IN (" . Db::in($family) . ')', [$tableId, ...$family])) {
                 throw new \InvalidArgumentException(I18n::t('order.err_table_busy'));
@@ -506,7 +510,23 @@ final class Orders
         Audit::log('order.transfer', self::where($o) . ' → Masa ' . $to . (count($family) > 1 ? ' · ' . count($family) . ' hesap' : ''), 'order', $orderId);
     }
 
-    /** Moves every line (and payments) of $fromId into $intoId and closes $fromId. */
+    /** The open bills of an order's family: up to the first bill it was split from, then down every split, at any depth. */
+    public static function family(string $orderId): array
+    {
+        $root = $orderId;
+        for ($i = 0; $i < 50 && ($up = Db::value('SELECT parent_id FROM orders WHERE id = ?', [$root])); $i++) {
+            $root = (string) $up;
+        }
+        return array_column(Db::rows("WITH RECURSIVE fam(id) AS (SELECT ? UNION SELECT o.id FROM orders o JOIN fam ON o.parent_id = fam.id)
+            SELECT o.id FROM orders o JOIN fam ON fam.id = o.id WHERE o.status IN ('pending', 'open', 'billed') AND o.deleted = 0", [$root]), 'id');
+    }
+
+    /**
+     * Moves every line of $fromId into $intoId and closes $fromId. The merged bill owes exactly what the two did
+     * (decision 44): the discounts of both become the amounts they gave on their own bill right then — 10% of the
+     * target stays 10% of the target's dishes, and a ₺150 discount that could only take ₺100 off its bill brings ₺100.
+     * Points spent on the merged-in bill go with its discount, so taking that discount off gives them back, once.
+     */
     public static function merge(string $fromId, string $intoId): void
     {
         $from = self::editable($fromId);
@@ -514,15 +534,19 @@ final class Orders
         if ((int) $from['paid'] > 0) {
             throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
         }
-        Db::tx(static function () use ($fromId, $intoId, $from): void {
-            // the discounts in force travel as the amounts they gave on their own bill (10% of that bill, not of both)
-            foreach (\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($fromId) as $d) {
-                $amount = $d['kind'] === 'pct' ? (int) round((int) $from['subtotal'] * (float) $d['value'] / 100) : (int) $d['amount'];
-                if ($amount > 0) {
-                    Db::append('order_discounts', ['order_id' => $intoId, 'kind' => 'amount', 'value' => $amount, 'amount' => $amount,
-                        'reason' => $d['reason'] === 'puan' ? 'puan' : 'birleştirme: ' . ($d['reason'] ?? ''), 'user_id' => $d['user_id'], 'at' => Clock::ms()]);
+        Db::tx(static function () use ($fromId, $intoId, $from, $into): void {
+            $entries = [];
+            foreach ([$intoId => $into, $fromId => $from] as $id => $bill) {
+                foreach (self::effective(\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($id), (int) $bill['subtotal']) as $d) {
+                    if ($d['amount'] > 0) {
+                        $entries[] = self::frozen($d, $d['amount'], $id === $fromId && $d['reason'] !== 'puan' ? 'birleştirme: ' . ($d['reason'] ?? '') : null);
+                    }
                 }
             }
+            if ($entries || \Sofrexa\Modules\Customers\Loyalty::activeDiscounts($intoId)) {
+                self::replaceDiscounts($intoId, $entries, 'birleştirme');
+            }
+            \Sofrexa\Modules\Customers\Loyalty::moveRedemptions($fromId, $intoId);
             foreach (Db::rows('SELECT id FROM order_items WHERE order_id = ? AND deleted = 0', [$fromId]) as $l) {
                 Db::save('order_items', ['id' => $l['id'], 'order_id' => $intoId]);
             }
@@ -533,6 +557,31 @@ final class Orders
         Audit::log('order.merge', self::where($from) . ' → ' . self::where($into), 'order', $intoId);
     }
 
+    /**
+     * The discounts in force on a bill as the amounts they take off it now, together never more than the bill (a ₺150
+     * discount on a ₺100 bill takes ₺100). Points come first: they are already spent. Each entry gets 'amount' = that.
+     */
+    private static function effective(array $entries, int $sub): array
+    {
+        $points = array_values(array_filter($entries, static fn(array $d): bool => $d['reason'] === 'puan'));
+        $rest = array_values(array_filter($entries, static fn(array $d): bool => $d['reason'] !== 'puan'));
+        $room = max(0, $sub);
+        $out = [];
+        foreach ([...$points, ...$rest] as $d) {
+            $raw = $d['kind'] === 'pct' ? (int) round($sub * (float) $d['value'] / 100) : (int) $d['amount'];
+            $amount = max(0, min($raw, $room));
+            $room -= $amount;
+            $out[] = ['amount' => $amount] + $d;
+        }
+        return $out;
+    }
+
+    /** A discount entry fixed at an amount (its reason kept, or $reason), for replaceDiscounts or a new bill. */
+    private static function frozen(array $d, int $amount, ?string $reason = null): array
+    {
+        return ['kind' => 'amount', 'value' => $amount, 'amount' => $amount, 'reason' => $reason ?? $d['reason'], 'user_id' => $d['user_id'] ?? null];
+    }
+
     public static function setWaiter(string $orderId, string $userId): void
     {
         $o = self::editable($orderId);
@@ -540,7 +589,8 @@ final class Orders
         if ($name === null) {
             throw new HttpError(404);
         }
-        Db::save('orders', ['id' => $orderId, 'waiter_id' => $userId]);
+        Db::save('orders', ['id' => $orderId, 'waiter_id' => $userId, 'assigned_at' => Clock::ms()]);
+        Notify::follow($orderId, $userId);
         Audit::log('order.transfer', self::where($o) . ' · garson → ' . $name, 'order', $orderId);
     }
 
@@ -558,24 +608,7 @@ final class Orders
             $sub = (int) Db::value("SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]);
             $moved = (int) Db::value('SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE id IN (' . Db::in($ids) . ')', $ids);
             $rest = $sub - $moved;
-            // discounts follow the dishes: a percentage stays on both bills, a fixed amount is shared by value,
-            // points stay on this bill (they were used for it)
-            $mine = [];
-            $theirs = [];
-            $points = 0;
-            foreach (\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId) as $d) {
-                if ($d['kind'] === 'pct') {
-                    $mine[] = $d;
-                    $theirs[] = $d;
-                } elseif ($d['reason'] === 'puan') {
-                    $mine[] = $d;
-                    $points += (int) $d['amount'];
-                } else {
-                    $share = $sub > 0 ? (int) round((int) $d['amount'] * $moved / $sub) : 0;
-                    $mine[] = ['amount' => (int) $d['amount'] - $share, 'value' => (int) $d['amount'] - $share] + $d;
-                    $theirs[] = ['amount' => $share, 'value' => $share] + $d;
-                }
-            }
+            [$mine, $theirs, $points] = self::shareDiscounts(\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId), $sub, $moved);
             // what was already paid (money or points) must still be covered by what stays on this bill
             $restTotal = $rest - min($rest, self::discountTotal($mine, $rest));
             if ((int) $o['paid'] > $restTotal || $points > $rest) {
@@ -585,13 +618,11 @@ final class Orders
             foreach ($ids as $id) {
                 Db::save('order_items', ['id' => $id, 'order_id' => $new]);
             }
-            if (array_filter($theirs, static fn(array $d): bool => $d['kind'] !== 'pct')) {
+            if ($mine || $theirs) {
                 self::replaceDiscounts($orderId, $mine, 'bölme');
             }
             foreach ($theirs as $d) {
-                if ($d['kind'] === 'pct' || (int) $d['amount'] > 0) {
-                    Db::append('order_discounts', ['order_id' => $new, 'kind' => $d['kind'], 'value' => $d['value'], 'amount' => $d['amount'], 'reason' => $d['reason'], 'user_id' => $d['user_id'], 'at' => Clock::ms()]);
-                }
+                Db::append('order_discounts', ['order_id' => $new, 'kind' => $d['kind'], 'value' => $d['value'], 'amount' => $d['amount'], 'reason' => $d['reason'], 'user_id' => $d['user_id'], 'at' => Clock::ms()]);
             }
             self::recalc($orderId);
             self::recalc($new);
@@ -599,6 +630,61 @@ final class Orders
         });
         Audit::log('order.split', self::where($o) . ' · ' . count($lines) . ' ürün ayrı hesaba', 'order', $new);
         return $new;
+    }
+
+    /**
+     * The discounts of a bill when part of it ($moved of $sub, kuruş) leaves for a new bill (decision 44). Each discount
+     * is shared as the amount it takes off now, in proportion to the dishes; the kuruş left over by rounding go to the
+     * largest fractions, so the two bills together owe exactly what the one did (two ₺0,01 dishes at 50% stay ₺0,01).
+     * Points stay on this bill — they were used for it; if they leave it too little room, the rest of the discount
+     * goes with the dishes that left. Returns [this bill's entries, the new bill's entries, points].
+     */
+    private static function shareDiscounts(array $active, int $sub, int $moved): array
+    {
+        $entries = self::effective($active, $sub);
+        $points = 0;
+        $share = [];
+        foreach ($entries as $k => $d) {
+            if ($d['reason'] === 'puan') {
+                $points += $d['amount'];
+            } else {
+                $share[$k] = $sub > 0 ? $d['amount'] * $moved / $sub : 0.0;
+            }
+        }
+        $give = array_map(static fn(float $s): int => (int) floor($s), $share);
+        $left = (int) round(array_sum($share)) - array_sum($give);
+        $order = array_keys($share);
+        usort($order, static fn(int $a, int $b): int => [$share[$b] - floor($share[$b]), $a] <=> [$share[$a] - floor($share[$a]), $b]);
+        foreach ($order as $k) {
+            if ($left <= 0) {
+                break;
+            }
+            $give[$k]++;
+            $left--;
+        }
+        // what stays here may not exceed what stays here: move the excess over with the dishes that left
+        $over = $points + array_sum(array_map(static fn(int $k): int => $entries[$k]['amount'] - $give[$k], array_keys($give))) - ($sub - $moved);
+        foreach (array_keys($give) as $k) {
+            if ($over <= 0) {
+                break;
+            }
+            $room = min($entries[$k]['amount'] - $give[$k], $moved - array_sum($give));
+            $take = max(0, min($over, $room));
+            $give[$k] += $take;
+            $over -= $take;
+        }
+        $mine = [];
+        $theirs = [];
+        foreach ($entries as $k => $d) {
+            $there = $give[$k] ?? 0;
+            if ($d['amount'] - $there > 0) {
+                $mine[] = self::frozen($d, $d['amount'] - $there);
+            }
+            if ($there > 0) {
+                $theirs[] = self::frozen($d, $there);
+            }
+        }
+        return [$mine, $theirs, $points];
     }
 
     /** Starts the discounts of an order again from $entries (the table is append-only: a reset entry, then the new ones). */
@@ -658,7 +744,13 @@ final class Orders
             if (!in_array($o['status'], self::OPEN, true)) {
                 throw new \InvalidArgumentException(I18n::t('order.err_closed'));
             }
-            if ((int) $o['paid'] >= (int) $o['total']) {
+            $over = (int) $o['paid'] - (int) $o['total'];
+            if ($over > 0) {
+                // more was paid than the bill now comes to (a dish cancelled after a part payment): the difference is
+                // given back first, on purpose and on record (refund), not swallowed by closing the bill
+                throw new \InvalidArgumentException(I18n::t('pay.err_overpaid', ['amount' => Money::fmt($over)]));
+            }
+            if ($over === 0) {
                 // nothing left to pay (discounted to ₺0, or covered by points): the bill closes without a made-up payment
                 self::close($orderId);
                 if ($receipt) {
@@ -669,6 +761,47 @@ final class Orders
             }
             return self::takePayment($o, $parts, $customerId, $receipt, $limit, $shift, $rates, $u);
         });
+    }
+
+    /**
+     * The bill now comes to less than was already paid (a dish cancelled after part of it was paid): the difference goes
+     * back to the guest — from the drawer ('cash') or reversed on the card machine ('card') — as a payment of minus that
+     * much, and the bill closes. Like any payment it belongs to the shift that makes it. Returns the amount given back.
+     */
+    public static function refund(string $orderId, string $method, bool $receipt = true): int
+    {
+        if (!Auth::can('cash.pay')) {
+            throw new HttpError(403, I18n::t('err.forbidden'));
+        }
+        $method = $method === 'card' ? 'card' : 'cash';
+        $shift = Shifts::currentId();
+        if (!$shift) {
+            throw new \InvalidArgumentException(I18n::t('order.err_no_shift'));
+        }
+        $u = Auth::user();
+        [$o, $over] = Db::tx(static function () use ($orderId, $method, $shift, $u): array {
+            $o = self::get($orderId);
+            if (!in_array($o['status'], self::OPEN, true)) {
+                throw new \InvalidArgumentException(I18n::t('order.err_closed'));
+            }
+            $over = (int) $o['paid'] - (int) $o['total'];
+            if ($over <= 0) {
+                throw new \InvalidArgumentException(I18n::t('pay.err_no_refund'));
+            }
+            Db::append('payments', ['order_id' => $orderId, 'shift_id' => $shift, 'method' => $method, 'currency' => 'TRY', 'amount_fx' => 0, 'rate' => 1,
+                'amount' => -$over, 'change_given' => 0, 'customer_id' => $o['customer_id'], 'at' => Clock::ms(), 'user_id' => $u['id'] ?? null, 'courier_id' => null]);
+            self::recalc($orderId);
+            self::close($orderId);
+            return [$o, $over];
+        });
+        if ($method === 'cash') {
+            Tickets::drawer();
+        }
+        if ($receipt) {
+            Tickets::receipt($orderId);
+        }
+        Audit::log('order.refund', self::where($o) . ' · ' . Money::fmt($over, false, 'tr') . ' iade · ' . ($method === 'card' ? 'kart' : 'nakit'), 'order', $orderId);
+        return $over;
     }
 
     /** The payment itself, inside pay()'s transaction. */

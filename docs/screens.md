@@ -1,6 +1,6 @@
 # Screens / صفحه‌ها
 
-Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **110 screens** (8 added after the 2026-09-28 audit: cancelled dishes IP1–IP4, C1b, C8b, W6b, S4b; then W12 and W12b, the loud "food is ready" alert on the waiter's phone). Every screen links to its frame. Overview images are in [`design/`](../design/).
+Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **112 screens** (8 added after the 2026-09-28 audit: cancelled dishes IP1–IP4, C1b, C8b, W6b, S4b; then W12 and W12b, the loud "food is ready" alert on the waiter's phone; then C2c and C3c, the refund of an overpaid bill, after the second audit). Every screen links to its frame. Overview images are in [`design/`](../design/).
 
 🆕 = added in design v1.1 (2026-09-28) · ✏️ = changed in v1.1 (Sofrexa branding, password login, loyalty points).
 
@@ -61,6 +61,8 @@ Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **110 screens** (
 | IP4 🆕 | Personele yaz (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=134-1987) |
 | C1b 🆕 | Kasa — iptal uyarısı · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=128-1528) |
 | C8b 🆕 | Kasa — iptal uyarısı · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=133-10367) |
+| C2c 🆕 | Ödeme — fazla ödeme iadesi · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=152-2135) |
+| C3c 🆕 | Ödeme — fazla ödeme iadesi · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=152-2209) |
 
 ## 04 · Mutfak · آشپزخانه
 

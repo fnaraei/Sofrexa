@@ -14,7 +14,7 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 3. **Mutfağa gönder**. Gönderilen ürün mutfak ekranına ve yazıcısına düşer.
 
 **Servis sırasında**
-- **Yemek hazır olunca telefonun çalar:** ekranı kaplayan yeşil bir uyarı masayı, bölümü ve hazır olan ürünleri gösterir. Gitmek üzereysen **Aldım**, şimdi gidemiyorsan **Sonra** (ses susar, uyarı Bildirimler'de kalır). Ses cevap verene kadar tekrarlanır.
+- **Yemek hazır olunca telefonun çalar:** ekranı kaplayan yeşil bir uyarı masayı, bölümü ve hazır olan ürünleri gösterir. Gitmek üzereysen **Aldım**, şimdi gidemiyorsan **Sonra** (ses susar, uyarı Bildirimler'de kalır). Ses cevap verene kadar tekrarlanır: ilk iki dakika 8 saniyede bir, sonra 30 saniyede bir. Uyarı açıkken mutfak aynı masaya bir tabak daha hazırlarsa kart kendini yeniler; **Aldım** yalnızca ekranda gördüğün tabakları teslim alır, sonradan gelen tabak için telefon yeniden çalar.
 - Bunun çalışması için **uygulama telefonda açık kalmalı**. Uygulama açıkken ekran kendiliğinden kararmaz. Sesi ilk kez açmak için vardiya başında ekrana bir kez dokunman yeterli — tarayıcı dokunmadan ses çalmaz.
 - Zil (**Bildirimler**): mutfakta hazır olan ürün, QR siparişi onayı, hesap isteği.
 - Hazır ürünü götürdükten sonra bildirimde **Servis edildi**.
@@ -40,7 +40,9 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 - **Karışık:** önce nakit, kalan karta.
 - **Kişiye böl / ürüne böl:** hesap üst kısmından.
 - **Müşteri ekle:** telefonla ara veya yeni kaydet → seviye indirimi otomatik uygulanır; **Puan kullan** ile birikmiş puan düşülür.
-- **İndirim** ve **fiş notu** hesabın altında.
+- **İndirim** ve **fiş notu** hesabın altında. İndirim, hesaptan alınmış paranın altına inemez; indirimi ödemeyi almadan önce yap.
+- **Fazla ödeme:** ödemenin bir kısmı alındıktan sonra bir ürün iptal edilir ve müşteri hesaptan fazla ödemiş olursa, ödeme ekranı para almak yerine **iade** gösterir: hesap, ödenen ve iade edilecek tutar. **Nakit iade** (kasadan) veya **Karta iade** (POS cihazından) seç, **İade et ve kapat**. İade, o vardiyaya ve işlem kaydına geçer.
+- **Hesap birleştirme ve bölme:** indirimler o anda sabit tutara çevrilir, böylece toplam kuruşu kuruşuna aynı kalır; birleştirme ya da bölmeden sonra eklenen ürüne önceki yüzde indirimi uygulanmaz.
 
 **Paket ve teslimat:** **Paket & Teslimat → Yeni** → müşteri (telefonla), adres, ürünler, ödeme şekli, kurye. Kurye dönünce **Kuryeler → hesaplaş → Teslim alındı**.
 

@@ -53,7 +53,7 @@ final class Menu
     /** available (manual switch), soldout (daily stock used up), left (null = unlimited), orderable. */
     public static function state(array $item, float $soldToday): array
     {
-        $left = $item['daily_stock'] === null ? null : max(0, (int) $item['daily_stock'] - (int) floor($soldToday));
+        $left = $item['daily_stock'] === null ? null : self::left((float) $item['daily_stock'] - $soldToday);
         $soldout = $left !== null && $left <= 0;
         return [
             'sold_today' => $soldToday,
@@ -66,8 +66,21 @@ final class Menu
     }
 
     /**
-     * item_id => quantity sent to the kitchen/bar on the current business day (voided lines excluded).
-     * Read from the orders themselves, so the web copy (QR and online menus) knows the same stock as the till.
+     * What is left of a daily stock, to the half portion as it is sold: a whole number stays a whole number ("3 left"),
+     * and nothing is rounded away — half a portion sent earlier still counts.
+     */
+    public static function left(float $left): int|float
+    {
+        $left = max(0.0, round($left, 3));
+        return $left === floor($left) ? (int) $left : $left;
+    }
+
+    /**
+     * item_id => portions taken from today's stock (the current business day): sent to the kitchen/bar and not cancelled,
+     * plus cancelled ones that were (or may have been) cooked — thrown away, eaten by staff, or still waiting for the
+     * till's answer. A cancelled dish that went back to stock uncooked gives its portion back; one that went to another
+     * bill is counted there, on its new line. Read from the orders themselves, so the web copy (QR and online menus)
+     * knows the same stock as the till.
      */
     public static function soldToday(): array
     {
@@ -77,7 +90,8 @@ final class Menu
         [$from, $to] = Clock::dayRange($day, $roll);
         return array_map('floatval', Db::pairs("SELECT oi.item_id, SUM(oi.qty) FROM order_items oi JOIN orders o ON o.id = oi.order_id
             WHERE (oi.sent_at >= ? AND oi.sent_at < ? OR oi.sent_at IS NULL AND o.day = ?) AND oi.item_id IS NOT NULL AND oi.deleted = 0
-              AND oi.status IN ('sent', 'ready', 'served') AND o.status <> 'void'
+              AND (oi.status IN ('sent', 'ready', 'served') AND o.status <> 'void'
+                OR oi.status = 'void' AND oi.void_stock IN ('pending', 'waste', 'staff'))
             GROUP BY oi.item_id", [$from, $to, $day]));
     }
 

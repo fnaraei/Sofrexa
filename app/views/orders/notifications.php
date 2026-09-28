@@ -43,7 +43,8 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
       };
       $base = '/my/notifications/' . $n['id'];
       $action = match ($n['kind']) {
-          'ready' => Ui::btn(t('notif.got'), ['size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
+          // the plates listed on this card, and no others: one added after the page was drawn keeps its alert
+          'ready' => Ui::btn(t('notif.got'), ['size' => 's', 'attrs' => ['data-post' => $base . '/done', 'data-body' => json_encode(['lines' => array_values((array) ($b['lines'] ?? []))])]]),
           'qr' => $n['ref_id'] ? Ui::btn(t('notif.review'), ['size' => 's', 'attrs' => ['data-load-sheet' => '/qr/orders/' . $n['ref_id']]]) : Ui::btn(t('notif.review'), ['size' => 's', 'href' => '/tables']),
           'bill' => Ui::btn(t('notif.prebill'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/prebill']]),
           'call' => Ui::btn(t('notif.going'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/done']]),

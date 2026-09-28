@@ -21,7 +21,7 @@ $bottom = Ui::btn(t('ui.cancel'), ['style' => 'secondary', 'size' => 'l', 'attrs
 $keep = static fn(array $x): string => url('/menu/quick', array_filter(['c' => $cat, 'q' => $q, 'm' => $mode === 'stock' ? 'stock' : null] + $x, static fn($v) => $v !== null && $v !== ''));
 $rows = array_map(static fn(array $i): array => [
     'id' => $i['id'], 'name' => tn($i['names']), 'cat' => $i['category_id'], 'price' => (int) $i['price'],
-    'stock' => $i['daily_stock'] === null ? null : (int) $i['daily_stock'], 'sold' => (int) floor((float) $i['sold_today']), 'on' => (bool) $i['available'],
+    'stock' => $i['daily_stock'] === null ? null : (int) $i['daily_stock'], 'sold' => \Sofrexa\Modules\Menu\Menu::left((float) $i['sold_today']), 'on' => (bool) $i['available'],
 ], $items);
 $fmtStock = static fn(?int $s): string => $s === null ? '—' : digits($s);
 ?>

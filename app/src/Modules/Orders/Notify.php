@@ -41,20 +41,88 @@ final class Notify
         if ($orderId && ($old = Db::row('SELECT id, body FROM notifications WHERE ref_type = ? AND ref_id = ? AND kind = ? AND done_at IS NULL AND deleted = 0', ['order', $orderId, $kind]))) {
             $prev = json_arr($old['body']);
             if (isset($prev['lines'], $params['lines'])) {
-                // more plates of the same table: one alert listing all of them
-                $params['lines'] = array_values(array_unique(array_merge((array) $prev['lines'], (array) $params['lines'])));
-                $params['what'] = trim(($prev['what'] ?? '') . ', ' . ($params['what'] ?? ''), ', ');
-                $params['text'] = trim(($prev['text'] ?? '') . ', ' . ($params['text'] ?? ''), ', ');
-                $params['items'] = array_merge((array) ($prev['items'] ?? []), (array) ($params['items'] ?? []));
-                if (($prev['station'] ?? null) !== ($params['station'] ?? null)) {
-                    $params['station'] = null; // the kitchen and the bar both have something: no single badge fits
-                }
+                $params = self::withPlates($prev, $params);
             }
-            Db::save('notifications', ['id' => $old['id'], 'body' => $params, 'at' => Clock::ms(), 'read_at' => null]);
+            // the bill may have changed hands since the first alert: it goes to whoever looks after the table now
+            Db::save('notifications', ['id' => $old['id'], 'body' => $params, 'at' => Clock::ms(), 'read_at' => null,
+                'user_id' => $userId, 'role' => $userId ? null : $role]);
             return $old['id'];
         }
         return Db::save('notifications', ['user_id' => $userId, 'role' => $userId ? null : $role, 'kind' => $kind, 'title' => $params['where'] ?? null,
             'body' => $params, 'ref_type' => $orderId ? 'order' : null, 'ref_id' => $orderId, 'at' => Clock::ms()]);
+    }
+
+    /**
+     * More plates for an open "ready" alert: one alert listing all of them, one row per order line. Calling the waiter
+     * again for the same plates changes nothing, and every row keeps its line, so "Aldım" can say exactly what was seen.
+     */
+    private static function withPlates(array $prev, array $params): array
+    {
+        $rows = [];
+        foreach ([...(array) ($prev['items'] ?? []), ...(array) ($params['items'] ?? [])] as $i) {
+            if (is_array($i)) {
+                $rows[(string) ($i['id'] ?? 'row' . count($rows))] = $i;
+            }
+        }
+        $params['lines'] = array_values(array_unique(array_merge((array) $prev['lines'], (array) $params['lines'])));
+        $params['items'] = array_values($rows);
+        if (($prev['station'] ?? null) !== ($params['station'] ?? null)) {
+            $params['station'] = null; // the kitchen and the bar both have something: no single badge fits
+        }
+        return self::describe($params);
+    }
+
+    /** "what" and "text" of a ready alert, rebuilt from its plate rows (the notifications list reads them). */
+    public static function describe(array $b): array
+    {
+        if (!empty($b['items'])) {
+            $b['what'] = implode(', ', array_map(static fn(array $i): string => $i['name'] . ((string) ($i['qty'] ?? '1') !== '1' ? ' ×' . $i['qty'] : ''), $b['items']));
+            $b['text'] = $b['what'] . (!empty($b['station']) ? ' · ' . ($b['station'] === 'bar' ? 'bar' : 'mutfak') : '');
+        }
+        return $b;
+    }
+
+    /**
+     * "Aldım" on a ready alert, for the plates the phone showed ($seen; every plate on it when the client did not say).
+     * Plates that joined the alert after it was shown stay on it, and it rings again for them. Returns the lines taken.
+     */
+    public static function collect(array $n, ?array $seen): array
+    {
+        $b = json_arr($n['body']);
+        $all = array_map('strval', (array) ($b['lines'] ?? []));
+        $took = $seen === null ? $all : array_values(array_intersect($all, array_map('strval', $seen)));
+        $left = array_values(array_diff($all, $took));
+        if (!$left) {
+            self::done($n['id']);
+            return $took;
+        }
+        $b['lines'] = $left;
+        $b['items'] = array_values(array_filter((array) ($b['items'] ?? []), static fn($i): bool => is_array($i) && in_array((string) ($i['id'] ?? ''), $left, true)));
+        Db::save('notifications', ['id' => $n['id'], 'body' => self::describe($b), 'read_at' => null]);
+        return $took;
+    }
+
+    /**
+     * Someone else looks after an order now (a waiter change): its open alerts follow the bill, so the new waiter's
+     * phone rings for the plates and the old one's stops.
+     */
+    public static function follow(string $orderId, ?string $userId): void
+    {
+        foreach (Db::rows("SELECT id FROM notifications WHERE ref_type = 'order' AND ref_id = ? AND done_at IS NULL AND deleted = 0
+            AND kind IN ('ready', 'qr', 'bill', 'call', 'served')", [$orderId]) as $n) {
+            Db::save('notifications', ['id' => $n['id'], 'user_id' => $userId, 'role' => $userId ? null : 'waiter', 'read_at' => null]);
+        }
+    }
+
+    /**
+     * A waiter left their shift: the alerts addressed to them go to every waiter, so a plate waiting at the pass does
+     * not ring on a phone that has gone home.
+     */
+    public static function release(string $userId): void
+    {
+        foreach (Db::rows("SELECT id FROM notifications WHERE user_id = ? AND done_at IS NULL AND deleted = 0 AND kind IN ('ready', 'qr', 'bill', 'call')", [$userId]) as $n) {
+            Db::save('notifications', ['id' => $n['id'], 'user_id' => null, 'role' => 'waiter', 'read_at' => null]);
+        }
     }
 
     /** The table's waiter, or every waiter when nobody owns the table. */
@@ -77,15 +145,20 @@ final class Notify
     public static function alerts(int $limit = 5): array
     {
         [$where, $p] = self::mine();
+        // a guest order to approve rings only for someone who may approve it
+        $kinds = Auth::can('orders.qr_approve') ? self::ALERT_KINDS : array_values(array_diff(self::ALERT_KINDS, ['qr']));
         $rows = Db::rows("SELECT id, kind, title, body, at FROM notifications WHERE deleted = 0 AND done_at IS NULL
-            AND read_at IS NULL AND kind IN (" . Db::in(self::ALERT_KINDS) . ") AND $where ORDER BY at LIMIT $limit", [...self::ALERT_KINDS, ...$p]);
+            AND read_at IS NULL AND kind IN (" . Db::in($kinds) . ") AND $where ORDER BY at LIMIT $limit", [...$kinds, ...$p]);
         return array_map(static function (array $n): array {
             $b = json_arr($n['body']);
             $station = $b['station'] ?? null;
             return ['id' => $n['id'], 'kind' => $n['kind'], 'where' => (string) ($b['where'] ?? $n['title'] ?? ''),
-                'area' => $b['area'] ?? '' ? tn($b['area']) : '',
+                'area' => !empty($b['area']) ? tn($b['area']) : '',
                 'station' => $station ? I18n::t('kds.st_' . $station) : '',
                 'items' => array_values(array_filter((array) ($b['items'] ?? []), 'is_array')),
+                // the plates on the card, and a version: the same alert with a new plate on it is shown again, and
+                // "Aldım" names the plates that were on the screen
+                'lines' => array_values(array_map('strval', (array) ($b['lines'] ?? []))), 'rev' => substr(md5((string) $n['body']), 0, 12),
                 'what' => (string) ($b['what'] ?? ''), 'text' => (string) ($b['text'] ?? ''), 'at' => (int) $n['at']];
         }, $rows);
     }

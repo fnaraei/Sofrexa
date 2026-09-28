@@ -1799,3 +1799,13 @@ a.strow:hover { background: var(--bg-surface-2); }
   .ralert__ic .ic { width: 58px; height: 58px; }
   .ralert__where { font-size: 60px; line-height: 66px; }
 }
+
+/* ------------------------------------------------------------ overpaid bill (C2c / C3c)
+   A dish was cancelled after part of the bill was paid: the payment panel shows what the bill is, what was paid and
+   what goes back, and the refund method (the payment method tiles), instead of taking money. */
+.payover { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--radius-lg); background: var(--bg-surface-2); }
+.payover__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.payover__row--back { padding-top: 12px; border-top: 1px solid var(--border-default); }
+@media (min-width: 1024px) {
+  #payover .paymethods { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+}

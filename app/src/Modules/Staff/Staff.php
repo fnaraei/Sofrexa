@@ -54,6 +54,7 @@ final class Staff
         }
         $at = Clock::ms();
         Db::append('time_entries', ['user_id' => $userId, 'kind' => 'out', 'at' => $at, 'device' => mb_substr((string) ($_COOKIE['sofrexa_device'] ?? ''), 0, 60) ?: null]);
+        \Sofrexa\Modules\Orders\Notify::release($userId);
         Audit::log('staff.clock_out', (string) Db::value('SELECT name FROM users WHERE id = ?', [$userId]) . ' · ' . self::duration($at - (int) $open['at'], 'tr'), 'user', $userId);
         return $at - (int) $open['at'];
     }

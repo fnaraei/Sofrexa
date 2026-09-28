@@ -188,11 +188,16 @@ final class Reports
      * Cost of what was sold (recipes), kuruş, VAT excluded: the ingredients of the bills settled in the period, whenever they
      * went to the kitchen — so the food cost of a bill opened last night and paid today sits next to its sales (a give-back
      * or a void booked as waste leaves the sale).
+     * A period that has ended keeps its figure (decision 45): what a bill cost is taken as it stood at the end of the period
+     * it was settled in. A cancelled dish the till decides on later (its ingredients back to stock, or to waste) corrects
+     * the period of that decision instead of rewriting a day that is already closed.
      */
     public static function costOfSales(int $from, int $to): int
     {
         return (int) round(-(float) Db::value("SELECT COALESCE(SUM(m.qty * m.unit_cost), 0) FROM stock_moves m JOIN order_items i ON i.id = m.order_item_id JOIN orders o ON o.id = i.order_id
-            WHERE m.reason IN ('sale', 'void') AND o.status = 'paid' AND o.deleted = 0 AND o.closed_at >= ? AND o.closed_at < ?", [$from, $to]));
+            WHERE m.reason IN ('sale', 'void') AND o.status = 'paid' AND o.deleted = 0
+              AND (o.closed_at >= ? AND o.closed_at < ? AND m.at < ? OR o.closed_at < ? AND m.at >= ? AND m.at < ?)",
+            [$from, $to, $to, $from, $from, $to]));
     }
 
     /** Ingredients that left the shelf for sales in the period by the time they went to the kitchen (the stock report). */

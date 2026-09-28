@@ -48,6 +48,8 @@ final class KitchenController
     {
         if ($req->param('token') !== '') {
             $this->guard($req);
+            // the TV's link needs no sign-in, so no route permission brings the till rule with it: ask for it here
+            \Sofrexa\Core\Router::tillOnly();
         } elseif (!Auth::can('kitchen.ready')) {
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
