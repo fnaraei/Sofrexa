@@ -55,10 +55,7 @@ final class Accounts
         if ($amount <= 0) {
             throw new ValidationError(['amount' => I18n::t('cust.err_amount')]);
         }
-        $shift = $method === 'transfer' ? null : Shifts::currentId();
-        if ($method !== 'transfer' && !$shift) {
-            throw new \InvalidArgumentException(I18n::t('order.err_no_shift'));
-        }
+        $shift = $method === 'transfer' ? null : Shifts::forCash(); // the drawer or the card machine: the till's
         $name = (string) Db::value('SELECT name FROM customers WHERE id = ? AND deleted = 0', [$customerId]);
         if ($name === '') {
             throw new HttpError(404);

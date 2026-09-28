@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Sofrexa\Modules\Staff;
 
-use Sofrexa\Core\{Audit, Db, I18n, Perms, Request, Response, ValidationError, View};
+use Sofrexa\Core\{Audit, Db, HttpError, I18n, Perms, Request, Response, ValidationError, View};
 
 /** ST5 — permission matrix: rows = permissions (grouped), columns = roles. The manager column is always all-on. */
 final class RolesController
@@ -45,18 +45,33 @@ final class RolesController
             Audit::log('role.save', $name . ' · ' . I18n::t('ui.new', [], 'tr'), 'role', $id);
             Response::json(['ok' => true, 'message' => I18n::t('roles.created'), 'redirect' => '/staff/roles']);
         }
-        $matrix = $req->arr('perms');
+        self::saveMatrix($req->arr('perms'));
+        Response::json(['ok' => true, 'message' => I18n::t('roles.saved')]);
+    }
+
+    /** The matrix as sent: role id => permission codes. Returns the changes made (for the activity log). */
+    public static function saveMatrix(array $matrix): array
+    {
         $changed = [];
         Db::tx(static function () use ($matrix, &$changed): void {
             foreach (self::roles() as $role) {
                 if ($role['all']) {
                     continue;
                 }
-                $new = Perms::clean(array_map('strval', (array) ($matrix[$role['id']] ?? [])));
+                // the matrix never makes a role "all" (only the manager column is): a request that asks is refused whole
+                $asked = array_map('strval', (array) ($matrix[$role['id']] ?? []));
+                if (in_array('*', $asked, true)) {
+                    throw new HttpError(403, I18n::t('roles.err_above'));
+                }
+                $new = Perms::clean($asked);
                 $old = Perms::clean($role['perms']);
                 sort($new);
                 sort($old);
                 if ($new !== $old) {
+                    // a delegated staff manager turns on and off only what they hold themselves
+                    if (!Perms::mayGrant([...array_diff($new, $old), ...array_diff($old, $new)])) {
+                        throw new HttpError(403, I18n::t('roles.err_above'));
+                    }
                     Db::save('roles', ['id' => $role['id'], 'perms' => $new]);
                     $label = static fn(array $ps): string => implode(', ', array_map(static fn(string $p): string => I18n::t('perm.' . $p, [], 'tr'), $ps));
                     $added = array_diff($new, $old);
@@ -68,6 +83,6 @@ final class RolesController
         if ($changed) {
             Audit::log('role.save', implode(' · ', $changed), 'role', null, ['changes' => $changed]);
         }
-        Response::json(['ok' => true, 'message' => I18n::t('roles.saved')]);
+        return $changed;
     }
 }

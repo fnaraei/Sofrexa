@@ -78,7 +78,7 @@ final class OrderController
     public function updateLine(Request $req): void
     {
         $l = Orders::line($req->param('id'));
-        Orders::updateLine($l['id'], $req->input('qty') !== null ? (float) $req->input('qty') : null, $req->input('note') !== null ? $req->str('note') : null);
+        Orders::updateLine($l['id'], $req->input('qty') !== null ? read_num($req->input('qty'), 'qty') : null, $req->input('note') !== null ? $req->str('note') : null);
         $this->state($l['order_id']);
     }
 

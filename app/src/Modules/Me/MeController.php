@@ -42,6 +42,7 @@ final class MeController
             throw new ValidationError(['new' => I18n::t('me.pin_weak')]);
         }
         Db::save('users', ['id' => $u['id'], 'pin_hash' => Auth::hashPin($new)]);
+        Auth::renew(); // this phone stays signed in; any other that used the old PIN is signed out
         Audit::log('user.reset_pin', $u['name'] . ' · kendisi', 'user', $u['id']);
         Response::json(['ok' => true, 'message' => I18n::t('me.pin_saved')]);
     }

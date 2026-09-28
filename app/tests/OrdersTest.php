@@ -127,6 +127,7 @@ return [
         check((bool) Customers::byPhone('+90 533 412 7790'), 'customer found by the normalised phone');
         same(0, (int) Db::value("SELECT COUNT(*) FROM order_items WHERE order_id = ? AND status = 'new'", [$id]), 'sent to the kitchen');
         same(1, (int) Db::value("SELECT COUNT(*) FROM print_jobs WHERE kind = 'courier'"), 'courier slip');
+        Delivery::move($id, 'ready'); // the kitchen's "Hazır" for its tickets
         Delivery::move($id, 'way');
         Delivery::move($id, 'done');
         $c = array_values(array_filter(Delivery::couriers(), static fn(array $x): bool => $x['id'] === $courier))[0];
@@ -162,6 +163,7 @@ return [
 
     'split: pay part of a table separately' => function () use ($setup): void {
         ['adana' => $adana, 'ayran' => $ayran, 'table' => $table] = $setup();
+        Shifts::open(['TRY' => 0]); // a card payment goes through the open shift
         $o = Orders::forTable($table);
         $a = Orders::addItem($o, $adana, 1);
         Orders::addItem($o, $ayran, 1);

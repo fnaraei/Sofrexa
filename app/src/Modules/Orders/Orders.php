@@ -56,14 +56,14 @@ final class Orders
         return $id ? self::get($id) : null;
     }
 
-    /** All open orders with totals and line counts (till list, table map). */
-    public static function open(array $channels = []): array
+    /** All open orders with totals and line counts (till list, table map); $statuses and $closedSince for the delivery board. */
+    public static function open(array $channels = [], array $statuses = self::OPEN, int $closedSince = 0): array
     {
-        $where = "o.status IN ('pending', 'open', 'billed') AND o.deleted = 0";
-        $p = [];
+        $where = 'o.status IN (' . Db::in($statuses) . ') AND o.deleted = 0' . ($closedSince ? ' AND o.closed_at >= ' . $closedSince : '');
+        $p = $statuses;
         if ($channels) {
             $where .= ' AND o.channel IN (' . Db::in($channels) . ')';
-            $p = $channels;
+            $p = [...$p, ...$channels];
         }
         return Db::rows("SELECT o.*, t.number AS table_no, t.area_id, a.name AS area_name, a.names AS area_names, u.name AS waiter_name, c.name AS customer_name,
                 (SELECT COUNT(*) FROM order_items l WHERE l.order_id = o.id AND l.deleted = 0 AND l.status <> 'void') AS line_count,
@@ -126,6 +126,7 @@ final class Orders
     public static function addItem(string $orderId, string $itemId, float $qty = 1, array $mods = [], string $note = ''): string
     {
         $o = self::editable($orderId);
+        self::notLeft($o);
         $item = Menu::get($itemId);
         if (!$item['orderable']) {
             throw new \InvalidArgumentException(I18n::t('order.err_soldout', ['name' => tn($item['names'])]));
@@ -391,6 +392,7 @@ final class Orders
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
         $target = self::editable($orderId);
+        self::notLeft($target);
         $lineId = Db::tx(static function () use ($voidId, $target): string {
             $v = self::voidedDish($voidId);
             $now = Clock::ms();
@@ -454,20 +456,24 @@ final class Orders
         if (!Auth::can('orders.discount')) {
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
-        $o = self::editable($orderId);
         $kind = $kind === 'amount' ? 'amount' : 'pct';
         if ($value <= 0 || ($kind === 'pct' && $value > 100)) {
             throw new ValidationError(['value' => I18n::t('order.err_discount')]);
         }
-        $amount = $kind === 'pct' ? (int) round((int) $o['subtotal'] * $value / 100) : (int) round($value);
-        $amount = min($amount, max(0, (int) $o['subtotal'] - (int) $o['discount']));
-        // money already taken is not given back by a discount: the bill may not drop below what was paid (a dish cancelled
-        // after a part payment is settled by an explicit refund on the payment screen instead)
-        if ((int) $o['paid'] > 0 && (int) $o['total'] - $amount < (int) $o['paid']) {
-            throw new ValidationError(['value' => I18n::t('order.err_discount_paid', ['paid' => Money::fmt((int) $o['paid'])])]);
-        }
-        Db::append('order_discounts', ['order_id' => $orderId, 'kind' => $kind, 'value' => $value, 'amount' => $amount, 'reason' => mb_substr($reason, 0, 120) ?: null, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
-        self::recalc($orderId);
+        // the bill read inside the write lock: a payment taken at the same moment is seen
+        [$o, $amount] = Db::tx(static function () use ($orderId, $kind, $value, $reason): array {
+            $o = self::editable($orderId);
+            $amount = $kind === 'pct' ? (int) round((int) $o['subtotal'] * $value / 100) : (int) round($value);
+            $amount = min($amount, max(0, (int) $o['subtotal'] - (int) $o['discount']));
+            // money already taken is not given back by a discount: the bill may not drop below what was paid (a dish cancelled
+            // after a part payment is settled by an explicit refund on the payment screen instead)
+            if ((int) $o['paid'] > 0 && (int) $o['total'] - $amount < (int) $o['paid']) {
+                throw new ValidationError(['value' => I18n::t('order.err_discount_paid', ['paid' => Money::fmt((int) $o['paid'])])]);
+            }
+            Db::append('order_discounts', ['order_id' => $orderId, 'kind' => $kind, 'value' => $value, 'amount' => $amount, 'reason' => mb_substr($reason, 0, 120) ?: null, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
+            self::recalc($orderId);
+            return [$o, $amount];
+        });
         Audit::log('order.discount', self::where($o) . ' · ' . ($kind === 'pct' ? '%' . I18n::num($value, 0, 'tr') : Money::fmt((int) $value, false, 'tr')) . ' · ' . Money::fmt($amount, false, 'tr') . ($reason !== '' ? ' · ' . $reason : ''), 'order', $orderId);
     }
 
@@ -537,10 +543,15 @@ final class Orders
     {
         $from = self::editable($fromId);
         $into = self::editable($intoId);
-        if ((int) $from['paid'] > 0) {
-            throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
-        }
-        Db::tx(static function () use ($fromId, $intoId, $from, $into): void {
+        self::notLeft($from);
+        self::notLeft($into);
+        Db::tx(static function () use ($fromId, $intoId, &$from, &$into): void {
+            // both bills read again inside the lock: a payment taken on the merged-away bill at the same moment is seen
+            $from = self::editable($fromId);
+            $into = self::editable($intoId);
+            if ((int) $from['paid'] > 0) {
+                throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
+            }
             // points used beyond what a bill can take off (it shrank since) go back now, while their value is still
             // known: once frozen to an amount below, nothing would tell the rest was never used
             \Sofrexa\Modules\Customers\Loyalty::settle($fromId);
@@ -611,12 +622,14 @@ final class Orders
     public static function split(string $orderId, array $lineIds): string
     {
         $o = self::editable($orderId);
+        self::notLeft($o);
         $lineIds = array_values(array_filter(array_map('strval', $lineIds)));
         $lines = $lineIds ? Db::rows('SELECT id FROM order_items WHERE order_id = ? AND id IN (' . Db::in($lineIds) . ") AND deleted = 0 AND status <> 'void'", [$orderId, ...$lineIds]) : [];
         if (!$lines) {
             throw new ValidationError(['lines' => I18n::t('order.err_pick_lines')]);
         }
-        $new = Db::tx(static function () use ($o, $orderId, $lines): string {
+        $new = Db::tx(static function () use ($orderId, $lines): string {
+            $o = self::editable($orderId); // what was paid, read inside the lock
             $ids = array_column($lines, 'id');
             $sub = (int) Db::value("SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]);
             $moved = (int) Db::value('SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE id IN (' . Db::in($ids) . ')', $ids);
@@ -748,10 +761,12 @@ final class Orders
         if (!array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'void')) {
             throw new \InvalidArgumentException(I18n::t('order.err_empty'));
         }
+        \Sofrexa\Core\Router::tillOnly(); // taking money is the till's work, from whatever page
+        // cash and card go into a shift (the drawer, the card machine); a bill put on account moves no money
+        $shift = array_filter($parts, static fn(array $p): bool => in_array($p['method'] ?? 'cash', ['cash', 'card'], true)) ? Shifts::forCash() : Shifts::currentId();
         if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId])) {
             self::send($orderId);
         }
-        $shift = Shifts::currentId();
         $rates = Rates::latest();
         $u = Auth::user();
         // one step, read inside the lock: two tills taking the last payment of a bill at once cannot both take it
@@ -793,10 +808,7 @@ final class Orders
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
         $method = $method === 'card' ? 'card' : 'cash';
-        $shift = Shifts::currentId();
-        if (!$shift) {
-            throw new \InvalidArgumentException(I18n::t('order.err_no_shift'));
-        }
+        $shift = Shifts::forCash();
         if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId])) {
             self::send($orderId);
         }
@@ -989,12 +1001,13 @@ final class Orders
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
         $o = self::editable($orderId);
-        if ((int) $o['paid'] > 0) {
-            throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
-        }
         $reason = trim($reason) ?: '—';
         $ask = [];
-        Db::tx(static function () use ($o, $orderId, $reason, &$ask): void {
+        Db::tx(static function () use (&$o, $orderId, $reason, &$ask): void {
+            $o = self::editable($orderId); // read inside the lock: a bill paid at the same moment is not cancelled
+            if ((int) $o['paid'] > 0) {
+                throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
+            }
             foreach (Db::rows("SELECT * FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]) as $l) {
                 // the same rules as for one line: cooked → waste, only sent → the till asks the kitchen, unsent → nothing to do
                 $cooks = $l['station'] === 'kitchen' || Db::value("SELECT 1 FROM stock_moves WHERE order_item_id = ? AND reason = 'sale' LIMIT 1", [$l['id']]);
@@ -1033,6 +1046,18 @@ final class Orders
     }
 
     // ------------------------------------------------------------ helpers
+
+    /**
+     * A bag out with the courier or delivered takes no more dishes, and is neither merged nor split: what is added now
+     * would never reach the guest, and the kitchen would cook it for nobody (found by the random steps, audit 8).
+     */
+    private static function notLeft(array $o): void
+    {
+        $d = is_array($o['delivery'] ?? null) ? $o['delivery'] : json_arr($o['delivery'] ?? null);
+        if (in_array($d['stage'] ?? '', ['way', 'done'], true)) {
+            throw new \InvalidArgumentException(I18n::t('deliv.err_left'));
+        }
+    }
 
     /**
      * Recalculates subtotal, discount, total and paid from lines, discounts and payments. A percentage discount follows the

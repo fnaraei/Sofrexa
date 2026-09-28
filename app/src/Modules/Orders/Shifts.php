@@ -22,15 +22,28 @@ final class Shifts
         return Db::value('SELECT id FROM shifts WHERE closed_at IS NULL AND deleted = 0 ORDER BY opened_at DESC LIMIT 1');
     }
 
+    /**
+     * The open shift cash goes into. Every drawer write asks here first, whatever page it comes from (audit 8, S05 and
+     * O04): the drawer is where the till is — the PC, or the web copy standing in for it — and cash moves only in an
+     * open shift, so no expense, salary, purchase or bill is booked as paid in cash with no drawer to show it.
+     */
+    public static function forCash(): string
+    {
+        \Sofrexa\Core\Router::tillOnly();
+        return self::currentId() ?? throw new \InvalidArgumentException(I18n::t('shift.err_none'));
+    }
+
     /** Opens a shift with the cash in the drawer: ['TRY' => kuruş, 'GBP' => 20.0, ...]. */
     public static function open(array $opening): string
     {
-        if (self::currentId()) {
-            throw new \InvalidArgumentException(I18n::t('shift.err_open'));
-        }
+        \Sofrexa\Core\Router::tillOnly();
         $u = Auth::user();
         $try = (int) ($opening['TRY'] ?? 0);
         $id = Db::tx(static function () use ($u, $try, $opening): string {
+            // asked inside the write lock: two tills opening at once open one shift (audit 8, O08)
+            if (self::currentId()) {
+                throw new \InvalidArgumentException(I18n::t('shift.err_open'));
+            }
             $id = Db::save('shifts', ['user_id' => $u['id'] ?? null, 'device' => \Sofrexa\Core\Audit::device(), 'opened_at' => Clock::ms(), 'opening_cash' => $try,
                 'counted' => null, 'expected' => null, 'note' => json_encode(['opening' => $opening], JSON_UNESCAPED_UNICODE)]);
             foreach ($opening as $cur => $amount) {
@@ -49,6 +62,7 @@ final class Shifts
      */
     public static function move(string $kind, string $currency, float $amount, string $reason, ?string $note = null, ?string $shiftId = null, ?string $reverses = null, ?string $photo = null, ?string $ref = null): string
     {
+        \Sofrexa\Core\Router::tillOnly();
         $shiftId ??= self::currentId();
         if (!$shiftId) {
             throw new \InvalidArgumentException(I18n::t('shift.err_none'));
@@ -75,17 +89,26 @@ final class Shifts
         return $id;
     }
 
-    /** Reverse entry for a mistaken cash move. */
+    /**
+     * Reverse entry for a mistaken cash move — once, whoever asks at the same moment (read inside the write lock, audit 8
+     * O07). A closed shift is never written to again (audit 8, O05): the money comes back into or goes out of the drawer
+     * now, so the correction is booked in the shift open now, naming the Z it corrects; with no shift open there is no
+     * drawer to put it right in, and it is refused.
+     */
     public static function reverse(string $moveId): string
     {
-        $m = Db::row('SELECT * FROM cash_moves WHERE id = ?', [$moveId]);
-        if (!$m || $m['kind'] === 'reverse' || Db::value('SELECT 1 FROM cash_moves WHERE reverses = ?', [$moveId])) {
-            throw new \InvalidArgumentException(I18n::t('shift.err_reverse'));
-        }
-        $id = Db::append('cash_moves', ['shift_id' => $m['shift_id'], 'kind' => 'reverse', 'currency' => $m['currency'], 'amount_fx' => -(float) $m['amount_fx'], 'amount' => -(int) $m['amount'],
-            'reason' => 'düzeltme: ' . $m['reason'], 'reverses' => $moveId, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
-        Audit::log('cash.reverse', Money::fmt(-(int) $m['amount'], false, 'tr') . ' · ' . $m['reason'], 'cash_move', $id);
-        return $id;
+        return Db::tx(static function () use ($moveId): string {
+            $m = Db::row('SELECT * FROM cash_moves WHERE id = ?', [$moveId]);
+            if (!$m || $m['kind'] === 'reverse' || Db::value('SELECT 1 FROM cash_moves WHERE reverses = ?', [$moveId])) {
+                throw new \InvalidArgumentException(I18n::t('shift.err_reverse'));
+            }
+            $shift = self::forCash();
+            $z = $m['shift_id'] !== $shift ? Db::value('SELECT z_no FROM shifts WHERE id = ?', [$m['shift_id']]) : null;
+            $id = Db::append('cash_moves', ['shift_id' => $shift, 'kind' => 'reverse', 'currency' => $m['currency'], 'amount_fx' => -(float) $m['amount_fx'], 'amount' => -(int) $m['amount'],
+                'reason' => mb_substr('düzeltme: ' . $m['reason'] . ($z ? ' · Z ' . $z : ''), 0, 120), 'reverses' => $moveId, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
+            Audit::log('cash.reverse', Money::fmt(-(int) $m['amount'], false, 'tr') . ' · ' . $m['reason'] . ($z ? ' · Z ' . $z : ''), 'cash_move', $id);
+            return $id;
+        });
     }
 
     public static function noSale(string $reason = ''): void
@@ -93,7 +116,7 @@ final class Shifts
         if (!Auth::can('cash.nosale')) {
             throw new \Sofrexa\Core\HttpError(403, I18n::t('err.forbidden'));
         }
-        $shift = self::currentId();
+        $shift = self::forCash();
         Db::append('cash_moves', ['shift_id' => $shift, 'kind' => 'nosale', 'currency' => 'TRY', 'amount_fx' => 0, 'amount' => 0, 'reason' => mb_substr($reason ?: 'satışsız açma', 0, 120), 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
         Audit::log('cash.nosale', I18n::t('audit.nosale_text', [], 'tr') . ($reason !== '' ? ' · ' . $reason : ''), 'shift', $shift);
         Tickets::drawer();

@@ -45,25 +45,35 @@ final class Staff
 
     public static function clockIn(string $userId): int
     {
-        $open = self::openEntry($userId);
-        if ($open) {
-            return (int) $open['at'];
+        // read and written in one write lock: two taps (or two phones) at once start one shift (audit 8, O10)
+        [$at, $new] = Db::tx(static function () use ($userId): array {
+            $open = self::openEntry($userId);
+            if ($open) {
+                return [(int) $open['at'], false];
+            }
+            $at = Clock::ms();
+            Db::append('time_entries', ['user_id' => $userId, 'kind' => 'in', 'at' => $at, 'device' => mb_substr((string) ($_COOKIE['sofrexa_device'] ?? ''), 0, 60) ?: null]);
+            return [$at, true];
+        });
+        if (!$new) {
+            return $at;
         }
-        $at = Clock::ms();
-        Db::append('time_entries', ['user_id' => $userId, 'kind' => 'in', 'at' => $at, 'device' => mb_substr((string) ($_COOKIE['sofrexa_device'] ?? ''), 0, 60) ?: null]);
         Audit::log('staff.clock_in', (string) Db::value('SELECT name FROM users WHERE id = ?', [$userId]), 'user', $userId);
         return $at;
     }
 
     public static function clockOut(string $userId): int
     {
-        $open = self::openEntry($userId);
-        if (!$open) {
-            throw new \InvalidArgumentException(I18n::t('staff.err_not_in'));
-        }
-        $at = Clock::ms();
-        Db::append('time_entries', ['user_id' => $userId, 'kind' => 'out', 'at' => $at, 'device' => mb_substr((string) ($_COOKIE['sofrexa_device'] ?? ''), 0, 60) ?: null]);
-        \Sofrexa\Modules\Orders\Notify::release($userId);
+        [$open, $at] = Db::tx(static function () use ($userId): array {
+            $open = self::openEntry($userId);
+            if (!$open) {
+                throw new \InvalidArgumentException(I18n::t('staff.err_not_in'));
+            }
+            $at = Clock::ms();
+            Db::append('time_entries', ['user_id' => $userId, 'kind' => 'out', 'at' => $at, 'device' => mb_substr((string) ($_COOKIE['sofrexa_device'] ?? ''), 0, 60) ?: null]);
+            \Sofrexa\Modules\Orders\Notify::release($userId);
+            return [$open, $at];
+        });
         Audit::log('staff.clock_out', (string) Db::value('SELECT name FROM users WHERE id = ?', [$userId]) . ' · ' . self::duration($at - (int) $open['at'], 'tr'), 'user', $userId);
         return $at - (int) $open['at'];
     }
@@ -278,14 +288,18 @@ final class Staff
     public static function saveProfile(string $id, array $in): void
     {
         $u = self::user($id);
+        Perms::requireManage($u);
         $role = Db::row('SELECT id, code, perms FROM roles WHERE id = ? AND deleted = 0', [(string) ($in['role_id'] ?? $u['role_id'])]);
         if (!$role) {
             throw new ValidationError(['role_id' => I18n::t('users.err_role')]);
         }
+        if ($role['id'] !== $u['role_id'] && !Perms::mayGrant(json_arr($role['perms']))) {
+            throw new \Sofrexa\Core\HttpError(403, I18n::t('users.err_role_above'));
+        }
         if ($u['role_code'] === 'manager' && $role['code'] !== 'manager' && $u['active'] && (int) Db::value("SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.code = 'manager' AND u.active = 1 AND u.deleted = 0") <= 1) {
             throw new ValidationError(['role_id' => I18n::t('users.err_last_manager')]);
         }
-        $pct = (float) str_replace(',', '.', preg_replace('/[^\d,.]/', '', strtr((string) ($in['commission_pct'] ?? '0'), ['٫' => ',', '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4', '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9'])) ?? '0');
+        $pct = read_num($in['commission_pct'] ?? '0', 'commission_pct');
         $row = [
             'id' => $id,
             'role_id' => $role['id'],
@@ -305,6 +319,10 @@ final class Staff
             $deny = array_diff(json_arr($u['perms_deny']), self::SWITCHES);
             foreach (self::SWITCHES as $p) {
                 $on = !empty($in['perms'][$p]);
+                $was = in_array($p, Perms::expand(array_values(array_diff([...$base, ...json_arr($u['perms_allow'])], json_arr($u['perms_deny'])))), true);
+                if ($on !== $was && !Perms::mayGrant([$p])) {
+                    throw new \Sofrexa\Core\HttpError(403, I18n::t('roles.err_above')); // a switch the one saving does not hold
+                }
                 if ($on && !in_array($p, $base, true)) {
                     $allow[] = $p;
                 } elseif (!$on && in_array($p, $base, true)) {
@@ -314,7 +332,7 @@ final class Staff
             $row['perms_allow'] = json_encode(array_values(array_unique($allow)));
             $row['perms_deny'] = json_encode(array_values(array_unique($deny)));
         }
-        Db::save('users', $row);
+        Db::save('users', $row); // new pay terms hold from this month on: the database keeps their history (020, decision 52)
         $changed = array_keys(array_filter($row, static fn($v, string $k): bool => $k !== 'id' && (string) ($u[$k] ?? '') !== (string) $v, ARRAY_FILTER_USE_BOTH));
         if ($changed) {
             Audit::log('user.save', $u['name'] . ' · ' . implode(', ', $changed), 'user', $id, ['changes' => $changed]);
@@ -337,12 +355,27 @@ final class Staff
      * One row per active person with a pay model (or anything paid this month):
      * sales, rate, fixed, deliveries, earned, paid (advances and payments), left.
      */
+    /**
+     * The pay terms a person worked a month under: the last change made in or before that month (decision 52). Before
+     * the history begins nothing earlier is known, so its first terms reach back (imported years keep what they showed);
+     * the profile as it is now for someone with no history at all.
+     * @return array{base_salary:int, commission_pct:float, pay_basis:?string, per_delivery:int}
+     */
+    public static function termsFor(array $u, string $month): array
+    {
+        $t = Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? AND from_month <= ? ORDER BY from_month DESC, at DESC, rowid DESC LIMIT 1', [$u['id'], $month])
+            ?? Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? ORDER BY from_month, at, rowid LIMIT 1', [$u['id']])
+            ?? $u;
+        return ['base_salary' => (int) $t['base_salary'], 'commission_pct' => (float) $t['commission_pct'], 'pay_basis' => $t['pay_basis'] ?? null, 'per_delivery' => (int) $t['per_delivery']];
+    }
+
     public static function payroll(string $month): array
     {
         [$from, $to] = self::period($month);
         $paid = Db::pairs('SELECT user_id, SUM(total) FROM payroll WHERE period = ? GROUP BY user_id', [$month]);
         $rows = [];
         foreach (Db::rows("SELECT u.*, r.code AS role_code, r.name AS role_name FROM users u JOIN roles r ON r.id = u.role_id WHERE u.deleted = 0 ORDER BY r.sort, u.sort, u.name") as $u) {
+            $u = self::termsFor($u, $month) + $u; // what that month was worked under, not what the profile says today
             $has = (int) $u['base_salary'] > 0 || (float) $u['commission_pct'] > 0 || (int) $u['per_delivery'] > 0;
             if (!($u['active'] && $has) && !isset($paid[$u['id']])) {
                 continue;
@@ -385,8 +418,8 @@ final class Staff
         if (!$amounts) {
             throw new ValidationError(['amount' => I18n::t('staff.err_amount')]);
         }
-        if ($method === 'cash' && !Shifts::currentId()) {
-            throw new \InvalidArgumentException(I18n::t('order.err_no_shift'));
+        if ($method === 'cash') {
+            Shifts::forCash(); // from the drawer: only where the till is, in an open shift (audit 8, S05)
         }
         $kind = $month >= date('Y-m') ? 'advance' : 'payment';
         $by = Auth::user()['id'] ?? null;
@@ -410,16 +443,10 @@ final class Staff
     /** CSV of the payroll (Excel). */
     public static function csv(string $month, array $rows): string
     {
-        $h = fopen('php://temp', 'w+');
-        fwrite($h, "\xEF\xBB\xBF");
-        fputcsv($h, ['Dönem', 'Personel', 'Rol', 'Satış', 'Oran %', 'Sabit', 'Teslimat', 'Hakediş', 'Ödenen', 'Kalan'], ';', '"', '');
         $m = static fn(int $k): string => number_format($k / 100, 2, ',', '.');
-        foreach ($rows as $r) {
-            fputcsv($h, [$month, $r['name'], I18n::t('role.' . $r['role_code'], [], 'tr'), $m($r['sales']), str_replace('.', ',', (string) (float) $r['commission_pct']),
-                $m((int) $r['base_salary']), $r['deliveries'], $m($r['earned']), $m($r['paid']), $m($r['left'])], ';', '"', '');
-        }
-        rewind($h);
-        return (string) stream_get_contents($h);
+        return \Sofrexa\Export\Csv::build(['Dönem', 'Personel', 'Rol', 'Satış', 'Oran %', 'Sabit', 'Teslimat', 'Hakediş', 'Ödenen', 'Kalan'],
+            array_map(static fn(array $r): array => [$month, $r['name'], I18n::t('role.' . $r['role_code'], [], 'tr'), $m($r['sales']), str_replace('.', ',', (string) (float) $r['commission_pct']),
+                $m((int) $r['base_salary']), $r['deliveries'], $m($r['earned']), $m($r['paid']), $m($r['left'])], $rows));
     }
 
     /** The person's own year of joining (hired_on, else the account). */

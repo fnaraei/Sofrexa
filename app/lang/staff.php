@@ -46,6 +46,8 @@ return [
     'users.err_self' => ['Kendi hesabınızı pasif yapamazsınız', 'You cannot deactivate your own account', 'نمی‌توانید حساب خودتان را غیرفعال کنید', 'Нельзя деактивировать свой аккаунт'],
     'users.err_last_manager' => ['En az bir aktif yönetici kalmalı', 'At least one active manager must remain', 'دست‌کم یک مدیر فعال باید بماند', 'Должен остаться хотя бы один активный управляющий'],
     'users.err_no_email' => ['Bu kullanıcının e-postası yok', 'This user has no e-mail', 'این کاربر ایمیل ندارد', 'У пользователя нет e-mail'],
+    'users.err_above' => ['Bu hesabın yetkisi sizinkinden fazla; yalnızca yönetici değiştirebilir', 'This account can do more than you can; only a manager can change it', 'اختیار این حساب از شما بیشتر است؛ فقط مدیر می‌تواند آن را تغییر دهد', 'У этого аккаунта больше прав, чем у вас; изменить его может только управляющий'],
+    'users.err_role_above' => ['Bu rolün yetkisi sizinkinden fazla; yalnızca yönetici verebilir', 'This role can do more than you can; only a manager can give it', 'اختیار این نقش از شما بیشتر است؛ فقط مدیر می‌تواند آن را بدهد', 'У этой роли больше прав, чем у вас; назначить её может только управляющий'],
     'users.empty' => ['Bu filtrede kullanıcı yok', 'No users in this filter', 'کاربری در این فیلتر نیست', 'Нет пользователей'],
     'users.pin_login_hint' => ['PIN ile giriş', 'PIN sign-in', 'ورود با PIN', 'Вход по PIN'],
 
@@ -75,6 +77,7 @@ return [
     'roles.created' => ['Rol eklendi', 'Role added', 'نقش اضافه شد', 'Роль добавлена'],
     'roles.manager_all' => ['Yönetici her zaman tüm yetkilere sahiptir', 'The manager always has every permission', 'مدیر همیشه همهٔ دسترسی‌ها را دارد', 'У управляющего всегда все права'],
     'roles.err_name' => ['Rol adı gerekli', 'Role name is required', 'نام نقش لازم است', 'Укажите название роли'],
+    'roles.err_above' => ['Yalnızca kendi sahip olduğunuz yetkileri açıp kapatabilirsiniz', 'You can only turn on and off permissions you have yourself', 'فقط مجوزهایی را می‌توانید روشن و خاموش کنید که خودتان دارید', 'Можно включать и выключать только те права, которые есть у вас'],
     'roles.delete_confirm' => ['{name} rolü silinsin mi?', 'Delete the role {name}?', 'نقش {name} حذف شود؟', 'Удалить роль {name}?'],
     'roles.err_in_use' => ['Bu rolde aktif kullanıcı var', 'Active users have this role', 'کاربران فعالی این نقش را دارند', 'У роли есть активные пользователи'],
     'roles.deleted' => ['Rol silindi', 'Role deleted', 'نقش حذف شد', 'Роль удалена'],

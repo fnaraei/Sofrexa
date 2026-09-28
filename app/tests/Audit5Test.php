@@ -11,13 +11,16 @@
  *   - a split or a merge leaves the open bills owing exactly what they owed, and the money on every bill adds up.
  * The sixth audit (D01–D03) found steps the generator did not play: moving a table, cancelling a whole bill, take-away
  * bills. It plays them now, with waiter changes, shifts ending, bill requests and waiter calls.
+ * The seventh (E01–E04) found the delivery flow missing: phone deliveries with their fee, the board's "Hazır", out with
+ * the courier, delivered, the courier's money — paid before or after. The rules: a bag never leaves with a dish still
+ * cooking; a bag on the board is one not both paid and handed over; the guest never reads "delivered" before it is.
  */
 declare(strict_types=1);
 
 use Sofrexa\Core\{App, Auth, Clock, Db, Migrator, Settings, Uuid};
 use Sofrexa\Modules\Kitchen\Kitchen;
 use Sofrexa\Modules\Menu\{Floor, Menu};
-use Sofrexa\Modules\Orders\{Accounts, Notify, Orders, Shifts};
+use Sofrexa\Modules\Orders\{Accounts, Delivery, Notify, Orders, Shifts};
 use Sofrexa\Modules\Staff\Staff;
 use Sofrexa\Setup\Seed;
 
@@ -90,7 +93,12 @@ $broken = static function () use ($alertOf): array {
         $o = Db::row('SELECT * FROM orders WHERE id = ' . ($n['ref_type'] === 'order' ? '?' : '(SELECT order_id FROM order_items WHERE id = ?)'), [$n['ref_id']]);
         // where the bill is, worked out here and not by the code under test
         $table = in_array($o['channel'], ['table', 'qr'], true);
-        $at = $table ? 'Masa ' . Db::value('SELECT number FROM tables WHERE id = ?', [$o['table_id']]) : 'Paket #' . $o['no'] . ($o['label'] ? ' · ' . $o['label'] : '');
+        $at = match ($o['channel']) {
+            'table', 'qr' => 'Masa ' . Db::value('SELECT number FROM tables WHERE id = ?', [$o['table_id']]),
+            'takeaway' => 'Paket #' . $o['no'] . ($o['label'] ? ' · ' . $o['label'] : ''),
+            'delivery' => 'Teslimat #' . $o['no'],
+            default => 'Online #' . $o['no'],
+        };
         $shown = Notify::place($n)['where'] ?? null;
         if ($shown !== $at) {
             $wrong[] = 'a "' . $n['kind'] . '" alert shows ' . $shown . ' for a bill at ' . $at;
@@ -103,6 +111,24 @@ $broken = static function () use ($alertOf): array {
         }
         if ($n['kind'] === 'bill' && isset(json_arr($n['body'])['by']) && ($n['role'] !== 'cashier' || $n['user_id'] !== null)) {
             $wrong[] = 'the till’s bill request went to a waiter';
+        }
+    }
+    // the delivery board (audit 7): worked out here from the rows, not by the code under test
+    $board = array_column(Delivery::open(), 'id');
+    foreach (Db::rows("SELECT * FROM orders WHERE channel IN ('delivery', 'takeaway', 'online') AND delivery IS NOT NULL AND deleted = 0") as $o) {
+        $d = json_arr((string) $o['delivery']);
+        $cooking = (int) Db::value("SELECT COUNT(*) FROM order_items WHERE order_id = ? AND deleted = 0 AND status IN ('new', 'sent')", [$o['id']]);
+        if (in_array($d['stage'] ?? '', ['way', 'done'], true) && $cooking > 0) {
+            $wrong[] = 'bag ' . substr($o['id'], -4) . ' left with a dish still cooking';
+        }
+        $prep = Db::row("SELECT COUNT(*) AS n, COALESCE(SUM(status = 'served'), 0) AS served FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void' AND NOT (status = 'served' AND sent_at IS NULL)", [$o['id']]);
+        $handed = ($d['stage'] ?? '') === 'done' || ($o['channel'] !== 'delivery' && ($d['type'] ?? '') !== 'delivery' && (int) $prep['n'] > 0 && (int) $prep['served'] >= (int) $prep['n']);
+        $should = in_array($o['status'], ['pending', 'open', 'billed'], true) || ($o['status'] === 'paid' && !$handed);
+        if ($should !== in_array($o['id'], $board, true)) {
+            $wrong[] = 'bag ' . substr($o['id'], -4) . ' (' . $o['status'] . ', ' . ($d['stage'] ?? '-') . ') is ' . ($should ? 'missing from' : 'still on') . ' the board';
+        }
+        if (\Sofrexa\Modules\Online\OnlineOrders::track(Orders::get($o['id']))['stage'] === 'done' && !$handed) {
+            $wrong[] = 'bag ' . substr($o['id'], -4) . ' reads "delivered" before it is';
         }
     }
     // money: what a bill says it was paid is its payments; a closed bill was paid exactly, and sent everything it had
@@ -208,23 +234,31 @@ return [
             foreach ($waiters as $w) {
                 Staff::clockIn($w);
             }
+            $courier = Seed::user('Kurye', 'courier', '4567');
+            \Sofrexa\Core\Settings::set('online.delivery_fee', 2500);
             mt_srand($seed);
             $orders = [];
             foreach ($s['tables'] as $t) {
                 $orders[] = Orders::create('table', ['table_id' => $t, 'guests' => 2]);
             }
             $pick = static fn(array $a) => $a ? $a[mt_rand(0, count($a) - 1)] : null;
+            $phone = static fn(string $type): string => Delivery::create(['type' => $type, 'phone' => '0533 000 00 0' . mt_rand(0, 9), 'name' => 'Müşteri', 'address' => 'Adres',
+                'courier_id' => mt_rand(0, 1) ? $courier : '', 'pay' => mt_rand(0, 1) ? 'cash' : 'card', 'items' => [['item_id' => $pick($s['items']), 'qty' => mt_rand(1, 2)]]]);
             for ($n = 0; $n < 150; $n++) {
                 $orders = array_column(Db::rows("SELECT id FROM orders WHERE status IN ('open', 'billed') AND deleted = 0"), 'id');
                 if (count($orders) < 2) {
-                    // bills get paid, cancelled and merged away: new guests sit down (or take away) so the steps go on
-                    $orders[] = mt_rand(0, 3) ? Orders::create('table', ['table_id' => $pick($s['tables']), 'guests' => 2]) : Orders::create('takeaway', ['label' => 'Paket']);
+                    // bills get paid, cancelled and merged away: new guests sit down (or take away, or phone) so the steps go on
+                    $orders[] = match (mt_rand(0, 5)) {
+                        0 => Orders::create('takeaway', ['label' => 'Paket']),
+                        1 => $phone(mt_rand(0, 2) ? 'delivery' : 'pickup'),
+                        default => Orders::create('table', ['table_id' => $pick($s['tables']), 'guests' => 2]),
+                    };
                 }
                 $o = $pick($orders);
                 $lines = Db::rows("SELECT id, status, round, station, qty FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$o]);
                 $live = array_values(array_filter($lines, static fn(array $l): bool => in_array($l['status'], ['sent', 'ready'], true)));
                 $l = $pick($live);
-                $step = mt_rand(0, 24);
+                $step = mt_rand(0, 28);
                 $bill = Db::row('SELECT total, paid FROM orders WHERE id = ?', [$o]);
                 $due = (int) $bill['total'] - (int) $bill['paid'];
                 $sum = (int) Db::value("SELECT COALESCE(SUM(total), 0) FROM orders WHERE status IN ('open', 'billed') AND deleted = 0");
@@ -339,6 +373,24 @@ return [
                             $bill2 = Orders::get($o);
                             if (in_array($bill2['channel'], ['table', 'qr'], true)) {
                                 Notify::toWaiter('call', $bill2, ['qr' => true]);
+                            }
+                            break;
+                        case 25:
+                            // a phone order comes in
+                            $phone(mt_rand(0, 2) ? 'delivery' : 'pickup');
+                            break;
+                        case 26: case 27:
+                            // a bag on the board moves on — paid or not (refused: still cooking, no courier, …)
+                            if ($bag = $pick(array_column(Delivery::open(), 'id'))) {
+                                Delivery::move($bag, ['ready', 'way', 'way', 'done'][mt_rand(0, 3)]);
+                            }
+                            break;
+                        case 28:
+                            // a courier is given, or hands in the money of what they delivered
+                            if (mt_rand(0, 1) && ($bag = $pick(array_column(Delivery::open(), 'id')))) {
+                                Delivery::assign($bag, $courier);
+                            } else {
+                                Delivery::settle($courier);
                             }
                             break;
                     }

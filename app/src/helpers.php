@@ -163,3 +163,21 @@ function upper(string $s, ?string $lang = null): string
     }
     return mb_strtoupper($s, 'UTF-8');
 }
+
+/**
+ * A typed number, read on the server exactly as the pages read it (Money::number, pay.js, stock.js): Persian and Arabic
+ * digits, "1.234,5", "36.82", "%10". Empty gives $empty; anything else that is not a number is refused on $field — never
+ * taken as 0, which once zeroed a stock count typed in Persian digits (audit 8, O02, O03).
+ * @throws Sofrexa\Core\ValidationError
+ */
+function read_num(mixed $v, string $field = 'value', ?float $empty = 0.0): ?float
+{
+    if (is_int($v) || is_float($v)) {
+        return (float) $v;
+    }
+    $s = trim(str_replace(['%', '٪'], '', (string) $v));
+    if ($s === '') {
+        return $empty;
+    }
+    return Money::number($s) ?? throw new Sofrexa\Core\ValidationError([$field => I18n::t('err.number')]);
+}

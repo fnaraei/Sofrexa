@@ -508,6 +508,9 @@ return [
     'deliv.err_name' => ['Müşteri adı gerekli', 'The customer’s name is required', 'نام مشتری لازم است', 'Нужно имя клиента'],
     'deliv.err_address' => ['Adres gerekli', 'An address is required', 'نشانی لازم است', 'Нужен адрес'],
     'deliv.err_empty' => ['Sepet boş', 'The basket is empty', 'سبد خالی است', 'Корзина пуста'],
+    'deliv.err_stage' => ['Bu sipariş bu adımı geçti', 'This order is past that step', 'این سفارش از این مرحله گذشته است', 'Заказ уже прошёл этот шаг'],
+    'deliv.err_left' => ['Paket yola çıktı — yeni sipariş olarak açın', 'This bag has left — open a new order', 'این بسته رفته است — سفارش تازه باز کنید', 'Заказ уже в пути — откройте новый'],
+    'deliv.err_cooking' => ['Mutfakta hazırlanan ürün var — önce “Hazır”', 'A dish is still being made — mark it ready first', 'غذایی هنوز در آشپزخانه است — اول «آماده»', 'Блюдо ещё готовится — сначала «Готово»'],
     // card actions
     'deliv.a_approve' => ['Onayla · mutfağa gönder', 'Approve · send to kitchen', 'تأیید · ارسال به آشپزخانه', 'Подтвердить · на кухню'],
     'deliv.a_reject' => ['Reddet', 'Reject', 'رد', 'Отклонить'],

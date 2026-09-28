@@ -69,7 +69,7 @@ final class PromotionsController
     {
         $in = ['scope' => $req->str('scope'), 'targets' => $req->arr('targets'), 'pct' => $req->str('pct')];
         $items = Promotions::affected($in);
-        if (!$items || (float) str_replace(',', '.', $in['pct']) <= 0) {
+        if (!$items || read_num($in['pct'], 'pct') <= 0) {
             Response::json(['ok' => true, 'title' => I18n::t('promo.preview_none'), 'sub' => '', 'n' => count($items)]);
         }
         $line = static fn(array $i): string => $i['name'] . ' ' . money($i['price']) . ' → ' . money($i['new']);

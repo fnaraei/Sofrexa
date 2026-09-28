@@ -27,9 +27,8 @@ final class DeliveryController
     /** Actions for one order on the board (approve, ready, courier, out, delivered, pay, slip, cancel). */
     public function sheet(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
-        $o['stage'] = Delivery::stage($o + ['line_count' => count(array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'void')),
-            'ready' => count(array_filter($o['lines'], static fn(array $l): bool => $l['status'] === 'ready'))]);
+        $o = Delivery::order($req->param('id')); // a paid bag not handed over yet is still worked on here
+        $o['stage'] = Delivery::stage($o);
         Response::json(['ok' => true, 'html' => View::partial('delivery/_sheet_order', ['o' => $o, 'couriers' => Delivery::couriers()])]);
     }
 
@@ -58,7 +57,7 @@ final class DeliveryController
 
     public function slip(Request $req): void
     {
-        Orders::editable($req->param('id'));
+        Delivery::order($req->param('id'));
         Tickets::courier($req->param('id'));
         Response::json(['ok' => true, 'message' => I18n::t('order.prebill_done')]);
     }

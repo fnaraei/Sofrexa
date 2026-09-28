@@ -126,9 +126,7 @@ final class Loyalty
 
     private static function pct(mixed $v): float
     {
-        // "%3", "3,5", "۳٫۵"
-        $s = strtr((string) $v, ['٫' => ',', '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4', '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9']);
-        return round(max(0, min(100, (float) str_replace(',', '.', preg_replace('/[^\d,.]/', '', $s) ?? ''))), 2);
+        return round(max(0, min(100, read_num($v, 'pct'))), 2); // "%3", "3,5", "۳٫۵"
     }
 
     // ------------------------------------------------------------ balance and tier
@@ -387,25 +385,28 @@ final class Loyalty
     /** Uses points on an open bill (C12): the discount is the points' value, capped by the bill. Returns the discount (kuruş). */
     public static function redeem(string $orderId, int $points): int
     {
-        $o = Orders::editable($orderId);
-        if (!$o['customer_id']) {
-            throw new ValidationError(['points' => I18n::t('loy.err_customer')]);
-        }
-        $balance = self::balance($o['customer_id']);
-        $min = (int) Settings::get('loyalty.min_redeem', 0);
-        if ($balance < $min) {
-            throw new ValidationError(['points' => I18n::t('loy.err_min', ['n' => $min])]);
-        }
-        $points = min($points, $balance, intdiv(max(0, (int) $o['total'] - (int) $o['paid']), self::pointValue()));
-        if ($points <= 0) {
-            throw new ValidationError(['points' => I18n::t('loy.err_none')]);
-        }
-        $amount = $points * self::pointValue();
-        Db::tx(static function () use ($o, $orderId, $points, $amount): void {
+        // the balance is read and spent inside one write lock: two bills of the same customer spending at the same moment
+        // cannot both spend the same points (audit 8, O06)
+        [$o, $points, $amount] = Db::tx(static function () use ($orderId, $points): array {
+            $o = Orders::editable($orderId);
+            if (!$o['customer_id']) {
+                throw new ValidationError(['points' => I18n::t('loy.err_customer')]);
+            }
+            $balance = self::balance($o['customer_id']);
+            $min = (int) Settings::get('loyalty.min_redeem', 0);
+            if ($balance < $min) {
+                throw new ValidationError(['points' => I18n::t('loy.err_min', ['n' => $min])]);
+            }
+            $points = min($points, $balance, intdiv(max(0, (int) $o['total'] - (int) $o['paid']), self::pointValue()));
+            if ($points <= 0) {
+                throw new ValidationError(['points' => I18n::t('loy.err_none')]);
+            }
+            $amount = $points * self::pointValue();
             Db::append('order_discounts', ['order_id' => $orderId, 'kind' => 'amount', 'value' => $amount, 'amount' => $amount, 'reason' => 'puan', 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
             Db::append('loyalty_ledger', ['customer_id' => $o['customer_id'], 'points' => -$points, 'kind' => 'redeem', 'order_id' => $orderId, 'at' => Clock::ms(), 'user_id' => Auth::user()['id'] ?? null]);
+            Orders::recalc($orderId);
+            return [$o, $points, $amount];
         });
-        Orders::recalc($orderId);
         Audit::log('loyalty.redeem', Orders::where($o) . ' · ' . $points . ' puan · ' . Money::fmt($amount, false, 'tr'), 'order', $orderId);
         return $amount;
     }
@@ -413,10 +414,10 @@ final class Loyalty
     /** Takes back the points used on an open bill (the point discount goes, the points return). */
     public static function unredeem(string $orderId): void
     {
-        if (self::used($orderId) <= 0) {
-            return;
-        }
         Db::tx(static function () use ($orderId): void {
+            if (self::used($orderId) <= 0) {
+                return; // asked inside the lock: taken back once, however many taps
+            }
             self::rebuild($orderId, static fn(array $d): bool => $d['reason'] !== 'puan');
             self::refund($orderId);
         });

@@ -139,10 +139,10 @@ final class Stock
         $unit = in_array($in['unit'] ?? '', self::UNITS, true) ? $in['unit'] : 'kg';
         $row = [
             'name' => mb_substr($name, 0, 120), 'unit' => $unit, 'category' => trim((string) ($in['category'] ?? '')) ?: null,
-            'kind' => ($in['kind'] ?? '') === 'semi' ? 'semi' : 'raw', 'min_qty' => max(0, (float) str_replace(',', '.', (string) ($in['min_qty'] ?? 0))),
+            'kind' => ($in['kind'] ?? '') === 'semi' ? 'semi' : 'raw', 'min_qty' => max(0, read_num($in['min_qty'] ?? 0, 'min_qty')),
             'supplier_id' => ($in['supplier_id'] ?? '') ?: null, 'active' => isset($in['active']) ? (int) (bool) $in['active'] : 1,
             'location' => trim((string) ($in['location'] ?? '')) ?: null,
-            'vat_rate' => max(0, (float) str_replace(',', '.', (string) ($in['vat_rate'] ?? 10))),
+            'vat_rate' => max(0, read_num($in['vat_rate'] ?? 10, 'vat_rate', 10.0)),
         ];
         if (isset($in['avg_cost']) && $in['avg_cost'] !== '') {
             $row['avg_cost'] = Money::parse($in['avg_cost']);
@@ -180,10 +180,10 @@ final class Stock
         $waste = [];
         foreach ($lines as $l) {
             $sid = (string) ($l['stock_item_id'] ?? $l[0] ?? '');
-            $qty = (float) str_replace(',', '.', (string) ($l['qty'] ?? $l[1] ?? 0));
+            $qty = read_num($l['qty'] ?? $l[1] ?? 0, 'qty');
             if ($sid !== '' && $qty > 0) {
                 $clean[$sid] = ($clean[$sid] ?? 0) + $qty;
-                $waste[$sid] = max(0, min(90, (float) str_replace(',', '.', (string) ($l['waste_pct'] ?? 0))));
+                $waste[$sid] = max(0, min(90, read_num($l['waste_pct'] ?? 0, 'waste_pct')));
             }
         }
         if ($kind === 'stock') {
@@ -226,6 +226,16 @@ final class Stock
     }
 
     /** Unit cost (kuruş per unit) of a stock item: its average purchase cost, or its recipe for a semi item without purchases. */
+    /**
+     * What a recipe line takes from stock: its quantity is what goes on the plate, and "Fire %" is the part of the raw
+     * ingredient lost preparing it (peel, bones, trimming), so 100 g at 20% fire takes 125 g — gross = net / (1 − fire).
+     * The same quantity everywhere: the cost, the stock a sale takes, a semi-finished item's cost (decision 53, audit 8 O01).
+     */
+    public static function gross(array $line): float
+    {
+        return (float) $line['qty'] / (1 - min(90.0, max(0.0, (float) ($line['waste_pct'] ?? 0))) / 100);
+    }
+
     public static function unitCost(string $stockId, int $depth = 0): float
     {
         $s = Db::row('SELECT kind, avg_cost FROM stock_items WHERE id = ?', [$stockId]);
@@ -235,7 +245,7 @@ final class Stock
         if ($s['kind'] === 'semi' && (float) $s['avg_cost'] <= 0 && $depth < self::MAX_DEPTH) {
             $sum = 0.0;
             foreach (self::recipe('stock', $stockId) as $l) {
-                $sum += (float) $l['qty'] * self::unitCost($l['stock_item_id'], $depth + 1);
+                $sum += self::gross($l) * self::unitCost($l['stock_item_id'], $depth + 1);
             }
             return $sum;
         }
@@ -248,7 +258,7 @@ final class Stock
         $lines = [];
         $total = 0.0;
         foreach (self::recipe('item', $itemId) as $l) {
-            $c = (float) $l['qty'] * self::unitCost($l['stock_item_id']);
+            $c = self::gross($l) * self::unitCost($l['stock_item_id']);
             $lines[] = $l + ['cost' => (int) round($c)];
             $total += $c;
         }
@@ -271,7 +281,7 @@ final class Stock
     public static function needs(string $kind, string $parentId, float $qty, int $depth = 0, array &$out = []): array
     {
         foreach (self::recipe($kind, $parentId) as $l) {
-            $need = (float) $l['qty'] * $qty;
+            $need = self::gross($l) * $qty;
             $expand = $l['item_kind'] === 'semi' && $depth < self::MAX_DEPTH && Db::value('SELECT 1 FROM recipes WHERE parent_kind = ? AND parent_id = ? AND deleted = 0', ['stock', $l['stock_item_id']])
                 && !Db::value("SELECT 1 FROM stock_moves WHERE stock_item_id = ? AND reason IN ('purchase', 'production') LIMIT 1", [$l['stock_item_id']]);
             if ($expand) {
@@ -379,16 +389,20 @@ final class Stock
         }
         $clean = [];
         foreach ($lines as $l) {
-            $qty = (float) str_replace(',', '.', (string) ($l['qty'] ?? 0));
+            $qty = read_num($l['qty'] ?? 0, 'qty');
             if (($l['stock_item_id'] ?? '') === '' || $qty <= 0) {
                 continue;
             }
             $price = $kind === 'purchase' ? (isset($l['total']) && $l['total'] !== '' ? Money::parse($l['total']) / $qty : Money::parse($l['unit_price'] ?? 0)) : self::unitCost($l['stock_item_id']);
-            $vatRate = isset($l['vat']) && $l['vat'] !== '' ? (float) str_replace(',', '.', (string) $l['vat']) : (float) Db::value('SELECT vat_rate FROM stock_items WHERE id = ?', [$l['stock_item_id']]);
+            $vatRate = isset($l['vat']) && $l['vat'] !== '' ? read_num($l['vat'], 'vat') : (float) Db::value('SELECT vat_rate FROM stock_items WHERE id = ?', [$l['stock_item_id']]);
             $clean[] = ['id' => (string) $l['stock_item_id'], 'qty' => $qty, 'price' => (float) $price, 'vat' => $kind === 'purchase' ? max(0, $vatRate) : 0, 'reason' => trim((string) ($l['reason'] ?? ''))];
         }
         if (!$clean) {
             throw new ValidationError(['lines' => I18n::t('stock.err_lines')]);
+        }
+        $cash = $kind === 'purchase' && ($head['pay_method'] ?? '') === 'cash';
+        if ($cash) {
+            \Sofrexa\Modules\Orders\Shifts::forCash(); // paid from the drawer: the till and an open shift, or nothing is booked
         }
         // purchase prices are without VAT (the stock cost); the invoice total adds the VAT
         $net = (int) round(array_sum(array_map(static fn(array $l): float => $l['qty'] * $l['price'], $clean)));
@@ -396,7 +410,8 @@ final class Stock
         $total = $net + $vat;
         $u = Auth::user();
         $now = Clock::ms();
-        $docId = Db::tx(static function () use ($kind, $clean, $head, $total, $vat, $u, $now): string {
+        $supplier = ($head['supplier_id'] ?? '') ? (string) Db::value('SELECT name FROM suppliers WHERE id = ?', [$head['supplier_id']]) : '';
+        $docId = Db::tx(static function () use ($kind, $clean, $head, $total, $vat, $u, $now, $cash, $supplier): string {
             $doc = Db::append('stock_docs', ['kind' => $kind, 'supplier_id' => ($head['supplier_id'] ?? '') ?: null, 'doc_no' => trim((string) ($head['doc_no'] ?? '')) ?: null,
                 'day' => ($head['day'] ?? '') ?: \Sofrexa\Modules\Orders\Orders::businessDay(), 'total' => $total, 'vat' => $vat, 'pay_method' => ($head['pay_method'] ?? '') ?: null,
                 'note' => trim((string) ($head['note'] ?? '')) ?: null, 'user_id' => $u['id'] ?? null, 'at' => $now]);
@@ -411,17 +426,16 @@ final class Stock
                 Db::append('stock_moves', ['doc_id' => $doc, 'stock_item_id' => $l['id'], 'qty' => $kind === 'purchase' ? $l['qty'] : -$l['qty'],
                     'unit_cost' => $l['price'], 'reason' => $kind === 'waste' && $l['reason'] !== '' ? 'waste:' . mb_substr($l['reason'], 0, 60) : $kind, 'at' => $now, 'user_id' => $u['id'] ?? null]);
             }
+            if ($cash) {
+                // the invoice, the stock and the cash leaving the drawer: one step, all or nothing
+                \Sofrexa\Modules\Orders\Shifts::move('out', 'TRY', $total, I18n::t('moves.r_supplier', [], 'tr'), trim($supplier . ' · ' . ($head['doc_no'] ?? ''), ' ·'), null, null, null, 'stock_doc:' . $doc);
+            }
             return $doc;
         });
-        $supplier = ($head['supplier_id'] ?? '') ? (string) Db::value('SELECT name FROM suppliers WHERE id = ?', [$head['supplier_id']]) : '';
         Audit::log('stock.' . $kind, trim($supplier . ' · ' . count($clean) . ' kalem · ' . Money::fmt($total, false, 'tr'), ' ·'), 'stock_doc', $docId);
         if ($kind === 'purchase') {
             foreach (Db::rows("SELECT DISTINCT parent_id FROM recipes WHERE parent_kind = 'item' AND deleted = 0") as $r) {
                 self::refreshItemCost($r['parent_id']);
-            }
-            // paid from the till: the cash leaves the drawer
-            if (($head['pay_method'] ?? '') === 'cash' && \Sofrexa\Modules\Orders\Shifts::currentId()) {
-                \Sofrexa\Modules\Orders\Shifts::move('out', 'TRY', $total, I18n::t('moves.r_supplier', [], 'tr'), trim($supplier . ' · ' . ($head['doc_no'] ?? ''), ' ·'), null, null, null, 'stock_doc:' . $docId);
             }
         }
         return $docId;
@@ -440,7 +454,10 @@ final class Stock
                 if ($v === '' || $v === null) {
                     continue;
                 }
-                $c = (float) str_replace(',', '.', (string) $v);
+                $c = read_num($v, 'counted[' . $sid . ']');
+                if ($c < 0) {
+                    throw new ValidationError(['counted[' . $sid . ']' => I18n::t('err.number')]);
+                }
                 $expected = self::onHand((string) $sid);
                 Db::append('stock_count_lines', ['doc_id' => $doc, 'stock_item_id' => (string) $sid, 'expected' => $expected, 'counted' => $c]);
                 $d = round($c - $expected, 3);

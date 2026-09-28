@@ -12,10 +12,69 @@ use Sofrexa\Modules\Customers\Customers;
  * stage (kitchen | ready | way | done), ready_at, out_at, done_at.
  * A delivered order stays open until the courier hands in the money ("Hesaplaş"); then the payments
  * are recorded with the courier and the order closes.
+ *
+ * Paying and handing over are two different ends (audit 7, E02; decision 54): a bag paid before it leaves stays on the
+ * board — its courier chosen, sent out, delivered — until it is handed over; one delivered and not yet paid waits for
+ * the courier's money. The board's "Hazır" is the kitchen's own "Hazır" (E03), the bag cannot leave while a dish is
+ * still cooking, and the delivery fee — no dish at all — is never waited for (E04).
  */
 final class Delivery
 {
     public const CHANNELS = ['delivery', 'takeaway', 'online'];
+    public const FEE_NAME = 'Teslimat ücreti';
+    /** How far back a paid bag not yet handed over is still looked for on the board. */
+    public const PAID_WINDOW_MS = 12 * 3_600_000;
+
+    /** The delivery fee as a line of its own that never goes to the kitchen (phone and online delivery alike, audit 7 E01). */
+    public static function addFee(string $orderId): void
+    {
+        $fee = (int) Settings::get('online.delivery_fee', 0);
+        if ($fee > 0) {
+            // round 0: no ticket of the kitchen's, so the first real one is still round 1
+            Db::save('order_items', ['order_id' => $orderId, 'name' => self::FEE_NAME, 'qty' => 1, 'unit_price' => $fee, 'station' => 'kitchen', 'round' => 0,
+                'status' => 'served', 'created_at' => Clock::ms(), 'served_at' => Clock::ms()]);
+            Orders::recalc($orderId);
+        }
+    }
+
+    /**
+     * The dishes of an order — the lines the kitchen makes, not the delivery fee (a line served without ever being sent):
+     * how many, how many still in the kitchen (new or sent), done (ready or served), handed over (served), and when last.
+     * @return array{prep:int, cooking:int, done:int, served:int, served_at:?int}
+     */
+    public static function plates(string $orderId): array
+    {
+        $r = Db::row("SELECT COUNT(*) AS prep, COALESCE(SUM(status IN ('new', 'sent')), 0) AS cooking, COALESCE(SUM(status IN ('ready', 'served')), 0) AS done,
+            COALESCE(SUM(status = 'served'), 0) AS served, MAX(served_at) AS served_at FROM order_items
+            WHERE order_id = ? AND deleted = 0 AND status <> 'void' AND NOT (status = 'served' AND sent_at IS NULL)", [$orderId]);
+        return ['prep' => (int) $r['prep'], 'cooking' => (int) $r['cooking'], 'done' => (int) $r['done'], 'served' => (int) $r['served'],
+            'served_at' => $r['served_at'] !== null ? (int) $r['served_at'] : null];
+    }
+
+    /** Handed over: delivered at the door ("Teslim edildi"), or — a take-away or pickup — every dish handed over at the counter. */
+    public static function handedOver(array $o): bool
+    {
+        $d = is_array($o['delivery'] ?? null) ? $o['delivery'] : json_arr($o['delivery'] ?? null);
+        if (($d['stage'] ?? '') === 'done') {
+            return true;
+        }
+        if (self::isDelivery($o)) {
+            return false;
+        }
+        $p = self::plates($o['id']);
+        return $p['prep'] > 0 && $p['served'] >= $p['prep'];
+    }
+
+    /** An order the board still works on: open, or paid and not yet handed over. */
+    public static function order(string $orderId): array
+    {
+        $o = Orders::get($orderId);
+        $o['delivery'] = is_array($o['delivery'] ?? null) ? $o['delivery'] : json_arr($o['delivery'] ?? null);
+        if (in_array($o['status'], Orders::OPEN, true) || ($o['status'] === 'paid' && in_array($o['channel'], self::CHANNELS, true) && !self::handedOver($o))) {
+            return $o;
+        }
+        throw new \InvalidArgumentException(I18n::t('order.err_closed'));
+    }
 
     /**
      * Creates a phone delivery or pickup order from the C4 screen and sends it to the kitchen.
@@ -72,6 +131,9 @@ final class Delivery
             foreach ($items as $i) {
                 Orders::addItem($id, (string) $i['item_id'], (float) ($i['qty'] ?? 1), (array) ($i['mods'] ?? []), (string) ($i['note'] ?? ''));
             }
+            if ($type === 'delivery') {
+                self::addFee($id); // what the form showed is what the bill says
+            }
             return $id;
         });
         Orders::send($orderId);
@@ -95,11 +157,12 @@ final class Delivery
         return (bool) Db::value("SELECT 1 FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND r.code = 'courier' AND u.active = 1 AND u.deleted = 0", [$userId]);
     }
 
-    /** Open takeaway, delivery and online orders with their stage. */
+    /** Takeaway, delivery and online orders on the board with their stage: the open ones, and the paid ones not handed over yet. */
     public static function open(): array
     {
         $out = [];
-        foreach (Orders::open(self::CHANNELS) as $o) {
+        $paid = array_filter(Orders::open(self::CHANNELS, ['paid'], Clock::ms() - self::PAID_WINDOW_MS), static fn(array $o): bool => !self::handedOver($o));
+        foreach ([...Orders::open(self::CHANNELS), ...$paid] as $o) {
             $o['delivery'] = json_arr($o['delivery']);
             $o['stage'] = self::stage($o);
             $out[] = $o;
@@ -107,7 +170,7 @@ final class Delivery
         return $out;
     }
 
-    /** pending | kitchen | ready | way | done — from the order and its lines. */
+    /** pending | kitchen | ready | way | done — from the order and its dishes (every dish ready is ready, whatever was tapped). */
     public static function stage(array $o): string
     {
         $d = is_array($o['delivery']) ? $o['delivery'] : json_arr($o['delivery']);
@@ -115,10 +178,11 @@ final class Delivery
             return 'pending';
         }
         $s = $d['stage'] ?? 'kitchen';
-        if ($s === 'kitchen' && (int) ($o['line_count'] ?? 0) > 0 && (int) ($o['ready'] ?? 0) >= (int) $o['line_count']) {
-            return 'ready';
+        if (in_array($s, ['way', 'done'], true)) {
+            return $s;
         }
-        return in_array($s, ['kitchen', 'ready', 'way', 'done'], true) ? $s : 'kitchen';
+        $p = self::plates($o['id']);
+        return $p['prep'] > 0 && $p['cooking'] === 0 ? 'ready' : 'kitchen';
     }
 
     /** C5 columns: pending, kitchen, ready, way (done orders wait for the courier's settlement). */
@@ -136,9 +200,22 @@ final class Delivery
     /** Moves an order along: approve (pending → kitchen), ready, way (out with the courier), done (delivered). */
     public static function move(string $orderId, string $to): void
     {
-        $o = Orders::editable($orderId);
+        $o = $to === 'approve' ? Orders::editable($orderId) : self::order($orderId);
         $d = $o['delivery'];
         $now = Clock::ms();
+        // only forward, and only the steps of its kind: kitchen → ready → out with the courier → delivered; a pickup is
+        // handed over from the pass. Never back: a bag delivered is not on its way again (the guest would read both).
+        $from = $to === 'approve' ? 'pending' : self::stage($o);
+        $allowed = match ($to) {
+            'approve' => ['pending'],
+            'ready' => ['kitchen', 'ready'],
+            'way' => self::isDelivery($o) ? ['kitchen', 'ready'] : [],
+            'done' => self::isDelivery($o) ? ['way'] : ['kitchen', 'ready'],
+            default => throw new \InvalidArgumentException('stage'),
+        };
+        if (!in_array($from, $allowed, true)) {
+            throw new \InvalidArgumentException(I18n::t('deliv.err_stage'));
+        }
         switch ($to) {
             case 'approve':
                 Db::save('orders', ['id' => $orderId, 'status' => 'open', 'approved_by' => Auth::user()['id'] ?? null]);
@@ -146,19 +223,28 @@ final class Delivery
                 Audit::log('order.approve', Orders::where($o), 'order', $orderId);
                 return;
             case 'ready':
+                // the kitchen's own "Hazır" for every ticket still cooking: the plates are ready and the till is called,
+                // exactly as from the kitchen screen — the board and the kitchen never disagree (audit 7, E03)
+                if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId])) {
+                    Orders::send($orderId);
+                }
+                foreach (Db::rows("SELECT DISTINCT round, station FROM order_items WHERE order_id = ? AND status = 'sent' AND deleted = 0 ORDER BY round", [$orderId]) as $t) {
+                    \Sofrexa\Modules\Kitchen\Kitchen::ready($orderId, (int) $t['round'], (string) $t['station']);
+                }
                 $d['stage'] = 'ready';
                 $d['ready_at'] = $now;
                 break;
             case 'way':
-                if (self::isDelivery($o) && empty($d['courier_id'])) {
+            case 'done':
+                // a bag leaves the pass only with its dishes: one still cooking is made ready first ("Hazır"), not left behind
+                if (self::plates($orderId)['cooking'] > 0) {
+                    throw new \InvalidArgumentException(I18n::t('deliv.err_cooking'));
+                }
+                if ($to === 'way' && self::isDelivery($o) && empty($d['courier_id'])) {
                     throw new ValidationError(['courier' => I18n::t('deliv.a_courier')]);
                 }
-                $d['stage'] = 'way';
-                $d['out_at'] = $now;
-                break;
-            case 'done':
-                $d['stage'] = 'done';
-                $d['done_at'] = $now;
+                $d['stage'] = $to;
+                $d[$to === 'way' ? 'out_at' : 'done_at'] = $now;
                 break;
             default:
                 throw new \InvalidArgumentException('stage');
@@ -172,7 +258,7 @@ final class Delivery
 
     public static function assign(string $orderId, ?string $courierId): void
     {
-        $o = Orders::editable($orderId);
+        $o = self::order($orderId);
         if ($courierId && !self::isCourier($courierId)) {
             throw new \Sofrexa\Core\HttpError(404);
         }

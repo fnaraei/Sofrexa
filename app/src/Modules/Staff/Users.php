@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Sofrexa\Modules\Staff;
 
-use Sofrexa\Core\{App, Audit, Auth, Clock, Db, I18n, Mailer, Settings, ValidationError};
+use Sofrexa\Core\{App, Audit, Auth, Clock, Db, HttpError, I18n, Mailer, Perms, Settings, ValidationError};
 
 /**
  * Staff accounts (ST8/ST9). Deleting deactivates: orders, payments and the activity log keep
@@ -60,6 +60,9 @@ final class Users
         if ($id !== '' && !$old) {
             throw new \InvalidArgumentException(I18n::t('err.not_found'));
         }
+        if ($old) {
+            Perms::requireManage($old); // an account above the one editing it (its e-mail leads to its password)
+        }
         $name = trim((string) ($in['name'] ?? ''));
         $email = strtolower(trim((string) ($in['email'] ?? '')));
         $roleId = (string) ($in['role_id'] ?? '');
@@ -69,9 +72,11 @@ final class Users
         if ($name === '') {
             $errors['name'] = I18n::t('users.err_name');
         }
-        $role = Db::row('SELECT id, code FROM roles WHERE id = ? AND deleted = 0', [$roleId]);
+        $role = Db::row('SELECT id, code, perms FROM roles WHERE id = ? AND deleted = 0', [$roleId]);
         if (!$role) {
             $errors['role_id'] = I18n::t('users.err_role');
+        } elseif ($roleId !== ($old['role_id'] ?? null) && !Perms::mayGrant(json_arr($role['perms']))) {
+            throw new HttpError(403, I18n::t('users.err_role_above')); // a role with more than the one giving it
         }
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors['email'] = I18n::t('users.err_email');
@@ -111,6 +116,9 @@ final class Users
             $row['id'] = $id;
         }
         $id = Db::save('users', $row);
+        if ($old && strtolower((string) $old['email']) !== $email) {
+            self::dropLinks($id); // a link sent to the old address sets no password any more
+        }
         $changes = $old ? array_keys(array_diff_assoc(array_map('strval', array_intersect_key($row, $old)), array_map('strval', array_intersect_key($old, $row)))) : ['new'];
         Audit::log('user.save', $name . ($old ? ' · ' . implode(', ', $changes) : ' · ' . I18n::t('ui.new', [], 'tr')), 'user', $id, ['changes' => $changes]);
         return ['id' => $id, 'pin' => $pin];
@@ -119,7 +127,9 @@ final class Users
     public static function resetPin(string $id): string
     {
         $u = self::get($id);
+        Perms::requireManage($u);
         $pin = self::newPin();
+        // a new PIN signs out every device that used the old one (Auth compares the session's credentials)
         Db::save('users', ['id' => $id, 'pin_hash' => Auth::hashPin($pin), 'failed_pins' => 0, 'locked_until' => 0]);
         Audit::log('user.reset_pin', $u['name'], 'user', $id);
         return $pin;
@@ -129,10 +139,12 @@ final class Users
     public static function sendPasswordLink(string $id): string
     {
         $u = self::get($id);
+        Perms::requireManage($u);
         if (!$u['email']) {
             throw new \InvalidArgumentException(I18n::t('users.err_no_email'));
         }
         $token = bin2hex(random_bytes(24));
+        self::dropLinks($id); // only the newest link works
         Db::save('password_resets', [
             'user_id' => $id,
             'token_hash' => hash('sha256', $token),
@@ -154,8 +166,10 @@ final class Users
     public static function deactivate(string $id): void
     {
         $u = self::get($id);
+        Perms::requireManage($u);
         self::guardDeactivate($u);
         Db::save('users', ['id' => $id, 'active' => 0, 'remote_login' => 0]);
+        self::dropLinks($id);
         Audit::log('user.delete', $u['name'], 'user', $id);
     }
 
@@ -170,13 +184,26 @@ final class Users
             [hash('sha256', $token), Clock::ms()]);
     }
 
+    /**
+     * Sets the password from a link. The link is taken inside the write lock, so two uses of one link set one password;
+     * every other link of the account ends with it (audit 8, S02), and so does every session (Auth).
+     */
     public static function setPassword(array $reset, string $password): void
     {
         Db::tx(static function () use ($reset, $password): void {
+            if (Db::exec('UPDATE password_resets SET used_at = ? WHERE id = ? AND used_at IS NULL AND deleted = 0 AND expires_at > ?', [Clock::ms(), $reset['reset_id'], Clock::ms()]) !== 1) {
+                throw new \InvalidArgumentException(I18n::t('pw.invalid'));
+            }
             Db::save('users', ['id' => $reset['id'], 'password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
-            Db::save('password_resets', ['id' => $reset['reset_id'], 'used_at' => Clock::ms()]);
+            self::dropLinks($reset['id']);
         });
         Audit::log('user.password_set', $reset['name'], 'user', $reset['id'], [], $reset);
+    }
+
+    /** Ends every password link of an account not used yet (a new link, a password set, the e-mail changed, deactivated). */
+    private static function dropLinks(string $userId): void
+    {
+        Db::exec('UPDATE password_resets SET deleted = 1 WHERE user_id = ? AND used_at IS NULL AND deleted = 0', [$userId]);
     }
 
     public static function strongEnough(string $pw): bool

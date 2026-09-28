@@ -195,7 +195,7 @@ final class CashierController
             Orders::clearDiscount($o['id']);
         } else {
             $kind = $req->str('kind') === 'amount' ? 'amount' : 'pct';
-            $value = $kind === 'amount' ? (float) Money::parse($req->str('value')) : (float) str_replace(',', '.', $req->str('value'));
+            $value = $kind === 'amount' ? (float) Money::parse($req->str('value')) : read_num($req->str('value'));
             if ((int) $o['discount'] > 0) {
                 Orders::clearDiscount($o['id']);
             }
@@ -264,7 +264,7 @@ final class CashierController
         foreach (Till::currencies() as $c) {
             $v = $req->str('open_' . $c);
             if ($v !== '') {
-                $opening[$c] = $c === 'TRY' ? Money::parse($v) : (float) str_replace(',', '.', $v);
+                $opening[$c] = $c === 'TRY' ? Money::parse($v) : read_num($v, 'open_' . $c);
             }
         }
         Shifts::open($opening + ['TRY' => 0]);
@@ -309,7 +309,7 @@ final class CashierController
         $diff = false;
         foreach (Till::currencies() as $c) {
             $v = $req->str('count_' . $c);
-            $counted[$c] = $c === 'TRY' ? Money::parse($v) : (float) str_replace(',', '.', $v === '' ? '0' : $v);
+            $counted[$c] = $c === 'TRY' ? Money::parse($v) : read_num($v, 'count_' . $c);
             $exp = $c === 'TRY' ? (int) ($expected['TRY'] ?? 0) : (float) ($expected[$c] ?? 0);
             if (abs($counted[$c] - $exp) > ($c === 'TRY' ? 0 : 0.001)) {
                 $diff = true;
@@ -363,7 +363,7 @@ final class CashierController
             throw new ValidationError(['reason' => I18n::t('moves.err_reason')]);
         }
         $cur = strtoupper($req->str('currency', 'TRY'));
-        $amount = $cur === 'TRY' ? (float) Money::parse($req->str('amount')) : (float) str_replace(',', '.', $req->str('amount'));
+        $amount = $cur === 'TRY' ? (float) Money::parse($req->str('amount')) : read_num($req->str('amount'), 'amount');
         if ($amount <= 0) {
             throw new ValidationError(['amount' => I18n::t('order.err_amount')]);
         }

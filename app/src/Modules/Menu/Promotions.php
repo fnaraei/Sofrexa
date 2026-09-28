@@ -36,7 +36,7 @@ final class Promotions
     public static function save(array $in): string
     {
         $names = Menu::langsIn($in['names'] ?? ['tr' => $in['name'] ?? '']);
-        $pct = (float) str_replace(',', '.', (string) ($in['pct'] ?? '0'));
+        $pct = read_num($in['pct'] ?? '0', 'pct');
         $scope = in_array($in['scope'] ?? '', ['all', 'categories', 'items'], true) ? $in['scope'] : 'all';
         $targets = $scope === 'all' ? [] : array_values(array_unique(array_filter(array_map('strval', (array) ($in['targets'] ?? [])))));
         $days = array_values(array_unique(array_filter(array_map('intval', (array) ($in['days'] ?? [])), static fn(int $d): bool => $d >= 1 && $d <= 7)));
@@ -356,7 +356,7 @@ final class Promotions
     {
         $scope = (string) ($in['scope'] ?? 'all');
         $targets = array_map('strval', is_array($in['targets'] ?? null) ? $in['targets'] : json_arr((string) ($in['targets'] ?? '[]')));
-        $pct = (float) str_replace(',', '.', (string) ($in['pct'] ?? 0));
+        $pct = read_num($in['pct'] ?? 0, 'pct');
         $out = [];
         foreach (Db::rows('SELECT i.id, i.names, i.price, i.category_id FROM items i JOIN categories c ON c.id = i.category_id
             WHERE i.deleted = 0 AND i.active = 1 AND c.deleted = 0 ORDER BY c.sort, i.sort, i.id') as $i) {

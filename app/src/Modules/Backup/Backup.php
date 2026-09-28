@@ -31,7 +31,16 @@ final class Backup
     public static function create(string $kind = 'manual'): string
     {
         $at = Clock::ms();
-        $zipPath = self::dir() . '/sofrexa-' . date('Ymd-His', intdiv($at, 1000)) . '-' . $kind . '.zip';
+        // a name no other backup has: two taken in the same second are two backups, not one written over the other
+        // (audit 8, O13) — the file is claimed with an exclusive create before anything is written into it
+        do {
+            $zipPath = self::dir() . '/sofrexa-' . date('Ymd-His', intdiv($at, 1000)) . sprintf('-%03d', $at % 1000) . '-' . bin2hex(random_bytes(2)) . '-' . $kind . '.zip';
+            $claim = @fopen($zipPath, 'x');
+        } while ($claim === false && is_file($zipPath));
+        if ($claim === false) {
+            throw new \RuntimeException('Cannot create ' . $zipPath);
+        }
+        fclose($claim);
         $manifest = self::export($zipPath, $kind);
 
         $places = ['pc'];
@@ -160,20 +169,36 @@ final class Backup
         $dest->close();
         @unlink($tmp);
 
-        // Uploads: replace the folder content with the saved one.
+        // Uploads: the folder becomes exactly the saved one (audit 8, O12) — every saved file written back, and every
+        // file added since the backup taken away (the safety backup above still has them)
         $uploads = App::storage('uploads');
+        $kept = [];
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $name = (string) $zip->getNameIndex($i);
-            if (!str_starts_with($name, 'uploads/') || str_ends_with($name, '/') || str_contains($name, '..')) {
+            if (!str_starts_with($name, 'uploads/') || str_ends_with($name, '/') || str_contains($name, '..') || str_contains($name, '\\')) {
                 continue;
             }
-            $target = $uploads . '/' . substr($name, 8);
+            $rel = substr($name, 8);
+            $target = $uploads . '/' . $rel;
             if (!is_dir(dirname($target))) {
                 mkdir(dirname($target), 0775, true);
             }
             file_put_contents($target, $zip->getFromIndex($i));
+            $kept[strtolower($rel)] = true;
         }
         $zip->close();
+        $root = realpath($uploads);
+        if ($root) {
+            $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
+            foreach ($it as $f) {
+                $rel = strtolower(str_replace('\\', '/', substr($f->getPathname(), strlen($root) + 1)));
+                if ($f->isFile() && !isset($kept[$rel])) {
+                    @unlink($f->getPathname());
+                } elseif ($f->isDir() && !(new \FilesystemIterator($f->getPathname()))->valid()) {
+                    @rmdir($f->getPathname()); // a folder left empty by it
+                }
+            }
+        }
 
         // Newer migrations than the backup are re-applied; the web copy is told to take a fresh snapshot.
         \Sofrexa\Core\Migrator::run();

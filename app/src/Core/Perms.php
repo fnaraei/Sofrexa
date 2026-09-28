@@ -47,6 +47,42 @@ final class Perms
         return in_array('*', $perms, true) ? ['*'] : array_values(array_intersect(self::all(), $perms));
     }
 
+    /**
+     * Whether the signed-in user may hand out $perms — on the roles matrix, as a user's switches, or as the role someone
+     * is given. A manager (*) gives anything; anyone else only what they hold themselves, and never "*": a delegated
+     * staff manager cannot make anyone, themselves included, more than they are (audit 8, S01).
+     */
+    public static function mayGrant(array $perms): bool
+    {
+        $u = Auth::user();
+        if (!$u) {
+            return false;
+        }
+        if (in_array('*', $u['perms'], true)) {
+            return true;
+        }
+        return !in_array('*', $perms, true) && !array_diff(self::expand($perms), $u['perms']);
+    }
+
+    /**
+     * Whether the signed-in user may manage the account $u (its details, e-mail, PIN, password link, role, switches):
+     * only one who could have given it everything it has. A manager's account is a manager's to manage.
+     */
+    public static function mayManage(array $u): bool
+    {
+        $role = json_arr((string) ($u['role_perms'] ?? Db::value('SELECT perms FROM roles WHERE id = ?', [$u['role_id'] ?? ''])));
+        $has = in_array('*', $role, true) ? ['*'] : array_diff(self::expand(array_unique([...$role, ...json_arr((string) ($u['perms_allow'] ?? '[]'))])), json_arr((string) ($u['perms_deny'] ?? '[]')));
+        return self::mayGrant(array_values($has));
+    }
+
+    /** @throws HttpError 403 when the signed-in user may not manage the account $u */
+    public static function requireManage(array $u): void
+    {
+        if (!self::mayManage($u)) {
+            throw new HttpError(403, I18n::t('users.err_above'));
+        }
+    }
+
     /** Expand a role's matrix permissions with the implied ones. */
     public static function expand(array $perms): array
     {

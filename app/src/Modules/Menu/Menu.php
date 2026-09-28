@@ -167,7 +167,7 @@ final class Menu
             'descs' => $descs,
             'price' => $price,
             'station' => in_array($in['station'] ?? '', ['kitchen', 'bar'], true) ? $in['station'] : null,
-            'vat_rate' => $vat === '' ? null : max(0, min(100, (float) str_replace(['%', ','], ['', '.'], $vat))),
+            'vat_rate' => $vat === '' ? null : max(0, min(100, read_num($vat, 'vat_rate'))),
             'prep_minutes' => ($in['prep_minutes'] ?? '') === '' ? null : max(0, min(240, (int) $in['prep_minutes'])),
             'available' => !empty($in['available']) ? 1 : 0,
             'show_web' => !empty($in['show_web']) ? 1 : 0,

@@ -41,15 +41,24 @@ final class Spooler
         Db::exec("UPDATE print_jobs SET status = 'expired' WHERE kind = 'drawer' AND status IN ('queued', 'retry') AND at < ?", [$now - self::DRAWER_TTL_MS]);
         $n = 0;
         $down = [];
-        foreach (Db::rows("SELECT * FROM print_jobs WHERE status IN ('queued', 'retry') AND (next_at IS NULL OR next_at <= ?) ORDER BY at, rowid LIMIT 20", [$now]) as $job) {
-            // a printer that just failed is not tried again for its other tickets in this pass (they keep their order)
+        foreach (Db::rows("SELECT * FROM print_jobs WHERE status IN ('queued', 'retry') ORDER BY at, rowid LIMIT 200") as $job) {
+            // each printer prints its tickets in the order they were made (audit 8, O16): while its oldest waiting ticket
+            // is paused for a retry, the newer ones wait behind it — a cancellation never comes out before the order it
+            // cancels — and a printer that just failed is not tried again in this pass. Other printers go on.
             if (isset($down[$job['printer']])) {
+                continue;
+            }
+            if ($job['next_at'] !== null && (int) $job['next_at'] > $now) {
+                $down[$job['printer']] = true;
                 continue;
             }
             if (self::run($job)) {
                 $n++;
             } else {
                 $down[$job['printer']] = true;
+            }
+            if ($n >= 20) {
+                break;
             }
         }
         // CAST: PDO sends numbers as text, and SQLite only turns them back into numbers next to a plain column

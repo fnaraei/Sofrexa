@@ -44,9 +44,14 @@ final class Finance
         [$fromDay, $toDay] = Clock::days($from, $to, $roll);
         $rows = [];
         // by hand and recurring (reversed ones and their reversals left out)
-        foreach (Db::rows("SELECT f.* FROM finance_entries f WHERE f.day >= ? AND f.day <= ? AND f.reverses IS NULL
-            AND NOT EXISTS (SELECT 1 FROM finance_entries r WHERE r.reverses = f.id)", [$fromDay, $toDay]) as $f) {
-            $rows[] = ['id' => $f['id'], 'at' => (int) $f['at'], 'day' => $f['day'], 'kind' => $f['kind'], 'category' => $f['category'], 'text' => (string) $f['description'],
+        // (an entry reversed the same day is left out with its reversal; reversed later, the reversal is a line of its own
+        // on its own day, so a period already reported keeps its figures — decision 45)
+        foreach (Db::rows("SELECT f.* FROM finance_entries f WHERE f.day >= ? AND f.day <= ?
+            AND NOT EXISTS (SELECT 1 FROM finance_entries o WHERE o.id = f.reverses AND o.day = f.day)
+            AND NOT EXISTS (SELECT 1 FROM finance_entries r WHERE r.reverses = f.id AND r.day = f.day)", [$fromDay, $toDay]) as $f) {
+            $text = (string) $f['description'];
+            $rows[] = ['id' => $f['id'], 'at' => (int) $f['at'], 'day' => $f['day'], 'kind' => $f['kind'], 'category' => $f['category'],
+                'text' => $f['reverses'] ? t('fin.correction', ['text' => $text]) : $text,
                 'method' => $f['method'], 'source' => $f['source'], 'amount' => (int) $f['amount'], 'receipt' => $f['receipt'], 'own' => true,
                 'fx' => $f['currency'] !== 'TRY' ? ['cur' => $f['currency'], 'fx' => (float) $f['amount_fx']] : null];
         }
@@ -76,15 +81,24 @@ final class Finance
         }
         // cash taken from the till for expenses (not purchases, salaries or entries booked above; not reversed)
         $reasons = self::tillReasons();
-        foreach (Db::rows("SELECT m.* FROM cash_moves m WHERE m.kind = 'out' AND m.at >= ? AND m.at < ? AND m.ref IS NULL AND m.reverses IS NULL
-            AND NOT EXISTS (SELECT 1 FROM cash_moves r WHERE r.reverses = m.id)", [$from, $to]) as $m) {
+        // (put right the same day: never happened; put right on a later day: a negative line on that day)
+        foreach (Db::rows("SELECT m.*, r.at AS rev_at FROM cash_moves m LEFT JOIN cash_moves r ON r.reverses = m.id
+            WHERE m.kind = 'out' AND m.ref IS NULL AND m.reverses IS NULL AND (m.at >= ? AND m.at < ? OR r.at >= ? AND r.at < ?)", [$from, $to, $from, $to]) as $m) {
             $cat = $reasons[mb_strtolower(trim((string) $m['reason']), 'UTF-8')] ?? null;
-            if ($cat === null) {
+            $day = Clock::day((int) $m['at'], $roll);
+            $revDay = $m['rev_at'] !== null ? Clock::day((int) $m['rev_at'], $roll) : null;
+            if ($cat === null || $revDay === $day) {
                 continue;
             }
-            $rows[] = ['id' => $m['id'], 'at' => (int) $m['at'], 'day' => Clock::day((int) $m['at'], $roll), 'kind' => 'expense', 'category' => $cat,
-                'text' => trim($m['reason'] . ($m['note'] ? ' · ' . $m['note'] : '')), 'method' => 'cash', 'source' => 'till', 'amount' => -(int) $m['amount'],
-                'receipt' => $m['photo'], 'own' => false, 'fx' => null];
+            $text = trim($m['reason'] . ($m['note'] ? ' · ' . $m['note'] : ''));
+            if ((int) $m['at'] >= $from && (int) $m['at'] < $to) {
+                $rows[] = ['id' => $m['id'], 'at' => (int) $m['at'], 'day' => $day, 'kind' => 'expense', 'category' => $cat,
+                    'text' => $text, 'method' => 'cash', 'source' => 'till', 'amount' => -(int) $m['amount'], 'receipt' => $m['photo'], 'own' => false, 'fx' => null];
+            }
+            if ($revDay !== null && (int) $m['rev_at'] >= $from && (int) $m['rev_at'] < $to) {
+                $rows[] = ['id' => $m['id'] . ':rev', 'at' => (int) $m['rev_at'], 'day' => $revDay, 'kind' => 'expense', 'category' => $cat,
+                    'text' => t('fin.correction', ['text' => $text]), 'method' => 'cash', 'source' => 'till', 'amount' => (int) $m['amount'], 'receipt' => null, 'own' => false, 'fx' => null];
+            }
         }
         $rows = array_values($rows);
         usort($rows, static fn(array $a, array $b): int => [$b['day'], $b['at']] <=> [$a['day'], $a['at']]);
@@ -136,7 +150,8 @@ final class Finance
         $cat = (string) ($in['category'] ?? '');
         $cur = strtoupper((string) ($in['currency'] ?? 'TRY'));
         $method = in_array($in['method'] ?? '', self::METHODS, true) ? $in['method'] : 'bank';
-        $day = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($in['day'] ?? '')) ? $in['day'] : date('Y-m-d');
+        // the business day: an entry made at 01:00 belongs to the day that is still running (to 05:00)
+        $day = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($in['day'] ?? '')) ? $in['day'] : \Sofrexa\Modules\Orders\Orders::businessDay();
         $err = [];
         if (!in_array($cat, $cats, true)) {
             $err['category'] = I18n::t('fin.err_category');
@@ -145,7 +160,7 @@ final class Finance
         if ($cur === 'TRY') {
             $amount = Money::parse((string) ($in['amount'] ?? ''));
         } else {
-            $fx = round((float) str_replace(',', '.', preg_replace('/[^\d,.]/', '', (string) ($in['amount'] ?? '')) ?? ''), 2);
+            $fx = round(read_num($in['amount'] ?? '', 'amount'), 2); // "1.234,56" is 1234.56 in any currency (audit 8, O03)
             $rate = Rates::latest()[$cur] ?? null;
             if (!$rate) {
                 $err['amount'] = I18n::t('order.err_rate', ['cur' => $cur]);
@@ -155,8 +170,13 @@ final class Finance
         if ($amount <= 0 && !isset($err['amount'])) {
             $err['amount'] = I18n::t('fin.err_amount');
         }
-        if ($method === 'cash' && $kind === 'expense' && !Shifts::currentId()) {
-            $err['method'] = I18n::t('fin.err_no_shift');
+        if ($method === 'cash') {
+            // in or out of the drawer: only where the till is, in an open shift (the move itself is made below, with the entry)
+            try {
+                Shifts::forCash();
+            } catch (\InvalidArgumentException) {
+                $err['method'] = I18n::t('fin.err_no_shift');
+            }
         }
         if ($err) {
             throw new ValidationError($err);
@@ -171,7 +191,7 @@ final class Finance
             }
             $id = Db::append('finance_entries', ['kind' => $kind, 'category' => $cat, 'description' => $text ?: null, 'day' => $day, 'amount' => $amount,
                 'currency' => $cur, 'amount_fx' => $fx, 'method' => $method, 'source' => 'manual', 'receipt' => $receipt, 'recurring_id' => $recurring, 'user_id' => $uid, 'at' => Clock::ms()]);
-            if ($method === 'cash' && Shifts::currentId()) {
+            if ($method === 'cash') {
                 Shifts::move($kind === 'expense' ? 'out' : 'in', $cur, $cur === 'TRY' ? $amount : $fx, I18n::t('fin.cat_' . $kind, [], 'tr') . ' · ' . self::catLabelTr($cat), $text ?: null, null, null, $receipt, 'finance:' . $id);
             }
             return $id;
@@ -185,22 +205,31 @@ final class Finance
         return I18n::has('fin.cat.' . $c) ? I18n::t('fin.cat.' . $c, [], 'tr') : $c;
     }
 
-    /** Cancels an entry made by hand (a reversal row; the cash move, if any, is reversed too). */
+    /**
+     * Cancels an entry made by hand: a reversal row, and the cash move reversed with it — both or neither (audit 8, O05).
+     * A cash entry is put right in the drawer of the shift open now; with none open (or away from the till) nothing is
+     * reversed. The reversal is booked on the day it is made (decision 45): a month already reported keeps its figures,
+     * and only an entry taken back the same day disappears from the list with it.
+     */
     public static function reverse(string $id): void
     {
         $f = Db::row('SELECT * FROM finance_entries WHERE id = ? AND reverses IS NULL', [$id]) ?? throw new HttpError(404);
-        if (Db::value('SELECT 1 FROM finance_entries WHERE reverses = ?', [$id])) {
-            return;
-        }
-        Db::tx(static function () use ($f): void {
-            Db::append('finance_entries', ['kind' => $f['kind'], 'category' => $f['category'], 'description' => $f['description'], 'day' => $f['day'], 'amount' => -(int) $f['amount'],
-                'currency' => $f['currency'], 'amount_fx' => -(float) $f['amount_fx'], 'method' => $f['method'], 'source' => $f['source'], 'reverses' => $f['id'],
+        $done = Db::tx(static function () use ($f): bool {
+            if (Db::value('SELECT 1 FROM finance_entries WHERE reverses = ?', [$f['id']])) {
+                return false; // asked twice at once: reversed once
+            }
+            Db::append('finance_entries', ['kind' => $f['kind'], 'category' => $f['category'], 'description' => $f['description'], 'day' => \Sofrexa\Modules\Orders\Orders::businessDay(),
+                'amount' => -(int) $f['amount'], 'currency' => $f['currency'], 'amount_fx' => -(float) $f['amount_fx'], 'method' => $f['method'], 'source' => $f['source'], 'reverses' => $f['id'],
                 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
             $move = Db::row("SELECT * FROM cash_moves WHERE ref = ? AND reverses IS NULL", ['finance:' . $f['id']]);
-            if ($move && !Db::value('SELECT 1 FROM cash_moves WHERE reverses = ?', [$move['id']]) && Shifts::currentId()) {
+            if ($move && !Db::value('SELECT 1 FROM cash_moves WHERE reverses = ?', [$move['id']])) {
                 Shifts::reverse($move['id']);
             }
+            return true;
         });
+        if (!$done) {
+            return;
+        }
         Audit::log('finance.reverse', self::catLabelTr($f['category']) . ' · ' . Money::fmt((int) $f['amount'], false, 'tr') . ($f['description'] ? ' · ' . $f['description'] : ''), 'finance', $f['id']);
     }
 
@@ -231,24 +260,39 @@ final class Finance
         Audit::log('finance.recurring_stop', self::catLabelTr($r['category']) . ' · ' . Money::fmt((int) $r['amount'], false, 'tr'), 'finance', $id);
     }
 
-    /** Nightly: books the recurring expenses whose day has come this month. Returns how many. */
+    /**
+     * Nightly: books every month of a recurring expense whose day has come and is not booked yet — a month the till was
+     * off for is booked when it is back (rent is owed all the same; decision 51). Each expense is read again inside the
+     * write lock, so two runs at once (the worker and the command line) book a month once (audit 8, O09). Returns how many.
+     */
     public static function runRecurring(?string $today = null): int
     {
-        $today ??= date('Y-m-d');
-        $month = substr($today, 0, 7);
+        $today ??= \Sofrexa\Modules\Orders\Orders::businessDay();
         $n = 0;
         foreach (self::recurring() as $r) {
-            if ($r['last_run'] === $month || (int) substr($today, 8, 2) < (int) $r['day_of_month']) {
-                continue;
-            }
-            Db::tx(static function () use ($r, $month): void {
-                Db::append('finance_entries', ['kind' => 'expense', 'category' => $r['category'], 'description' => $r['description'], 'day' => $month . sprintf('-%02d', (int) $r['day_of_month']),
-                    'amount' => (int) $r['amount'], 'currency' => 'TRY', 'amount_fx' => 0, 'method' => $r['method'], 'source' => 'recurring', 'recurring_id' => $r['id'], 'at' => Clock::ms()]);
-                Db::save('recurring_expenses', ['id' => $r['id'], 'last_run' => $month]);
+            $n += Db::tx(static function () use ($r, $today): int {
+                $r = Db::row('SELECT * FROM recurring_expenses WHERE id = ? AND deleted = 0 AND active = 1', [$r['id']]);
+                $booked = 0;
+                // the months after the last one booked, up to this one (this one only once its day has come)
+                for ($month = self::nextMonth((string) ($r['last_run'] ?? '')) ?? substr($today, 0, 7); $r && $month <= substr($today, 0, 7); $month = self::nextMonth($month)) {
+                    if ($month === substr($today, 0, 7) && (int) substr($today, 8, 2) < (int) $r['day_of_month']) {
+                        break;
+                    }
+                    Db::append('finance_entries', ['kind' => 'expense', 'category' => $r['category'], 'description' => $r['description'], 'day' => $month . sprintf('-%02d', (int) $r['day_of_month']),
+                        'amount' => (int) $r['amount'], 'currency' => 'TRY', 'amount_fx' => 0, 'method' => $r['method'], 'source' => 'recurring', 'recurring_id' => $r['id'], 'at' => Clock::ms()]);
+                    Db::save('recurring_expenses', ['id' => $r['id'], 'last_run' => $month]);
+                    $booked++;
+                }
+                return $booked;
             });
-            $n++;
         }
         return $n;
+    }
+
+    /** "2026-09" → "2026-10"; null for no month. */
+    private static function nextMonth(string $month): ?string
+    {
+        return preg_match('/^\d{4}-\d{2}$/', $month) ? date('Y-m', (int) strtotime($month . '-01 +1 month')) : null;
     }
 
     // ------------------------------------------------------------ profit and loss (FI3 / FI4)

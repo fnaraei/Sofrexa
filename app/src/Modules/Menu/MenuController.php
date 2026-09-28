@@ -85,7 +85,7 @@ final class MenuController
         }
         $id = $req->str('id');
         $vat = trim($req->str('vat_rate'));
-        $row = ['names' => $names, 'station' => $req->str('station') === 'bar' ? 'bar' : 'kitchen', 'vat_rate' => $vat === '' ? 0 : max(0, min(100, (float) str_replace(',', '.', $vat))),
+        $row = ['names' => $names, 'station' => $req->str('station') === 'bar' ? 'bar' : 'kitchen', 'vat_rate' => $vat === '' ? 0 : max(0, min(100, read_num($vat, 'vat_rate'))),
             'section' => $req->str('section') === 'drinks' ? 'drinks' : 'food', 'active' => $req->bool('active') ? 1 : 0];
         if ($id === '') {
             $row += ['slug' => Menu::slug($names['en'] ?? $names['tr']), 'sort' => (int) Db::value('SELECT COALESCE(MAX(sort), 0) + 10 FROM categories')];

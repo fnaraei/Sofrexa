@@ -58,15 +58,24 @@ final class OnlineOrders
         return $h[0] <= $h[1] ? ($now >= $h[0] && $now < $h[1]) : ($now >= $h[0] || $now < $h[1]);
     }
 
-    /** Later times of today for "Saat seç": every 15 minutes from an hour ahead until closing. */
+    /**
+     * Later times of this opening for "Saat seç": every 15 minutes from an hour ahead until closing. Hours that run past
+     * midnight ("18:00 – 02:00") are one opening: at 00:30 it is the one that began yesterday and 01:30 is still to
+     * come; before it opens, it is tonight's, times after midnight included (audit 8, O15).
+     */
     public static function slots(): array
     {
-        $h = self::hours() ?? [0, 24 * 60];
-        $close = $h[1] > $h[0] ? $h[1] : 24 * 60;
-        $from = (int) (ceil((self::minuteNow() + 60) / 15) * 15);
+        [$open, $close] = self::hours() ?? [0, 24 * 60];
+        $now = self::minuteNow();
+        if ($close <= $open) {
+            // past midnight: minutes counted from the midnight the opening began after
+            [$open, $close] = $now < $close ? [$open - 24 * 60, $close] : [$open, $close + 24 * 60];
+        }
+        $from = (int) (ceil(($now + 60) / 15) * 15);
         $out = [];
-        for ($m = max($from, $h[0]); $m <= $close - 15; $m += 15) {
-            $out[] = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+        for ($m = max($from, $open); $m <= $close - 15; $m += 15) {
+            $d = ($m % 1440 + 1440) % 1440;
+            $out[] = sprintf('%02d:%02d', intdiv($d, 60), $d % 60);
         }
         return $out;
     }
@@ -209,10 +218,7 @@ final class OnlineOrders
                 Orders::addItem($id, $l['item'], $l['qty'], $l['mods'], $l['note']);
             }
             if ($fee > 0) {
-                // the delivery fee is a line of its own that never goes to the kitchen
-                Db::save('order_items', ['order_id' => $id, 'name' => 'Teslimat ücreti', 'qty' => 1, 'unit_price' => $fee, 'station' => 'kitchen',
-                    'status' => 'served', 'created_at' => Clock::ms(), 'served_at' => Clock::ms()]);
-                Orders::recalc($id);
+                Delivery::addFee($id); // a line of its own that never goes to the kitchen
             }
             // written last, so the order row is queued for sync after its lines (the till waits for all of them)
             Db::save('orders', ['id' => $id, 'lines_expected' => (int) Db::value('SELECT COUNT(*) FROM order_items WHERE order_id = ? AND deleted = 0', [$id])]);
@@ -250,19 +256,24 @@ final class OnlineOrders
     /** "Onayla": the till accepts the order and says in how many minutes it will be ready (delivery: arrive). */
     public static function approve(string $orderId, int $minutes): void
     {
-        $o = Orders::editable($orderId);
-        if ($o['channel'] !== 'online' || $o['status'] !== 'pending') {
-            throw new \InvalidArgumentException(I18n::t('qr.err_handled'));
-        }
-        if (!QrOrders::complete($o)) {
-            throw new \InvalidArgumentException(I18n::t('sync.err_incomplete'));
-        }
-        $minutes = max(5, min(240, $minutes ?: self::etaMid()));
-        $d = $o['delivery'];
-        $d['eta_at'] = Clock::ms() + $minutes * 60_000;
-        $d['approved_at'] = Clock::ms();
-        Db::save('orders', ['id' => $orderId, 'delivery' => $d, 'approved_at' => Clock::ms()]);
-        Delivery::move($orderId, 'approve');
+        // one step (audit 8, O14): approved and sent to the kitchen, or — a dish run out since, say — neither, and the
+        // order still waits for "Onayla"; read inside the lock, so two taps approve it once
+        $d = Db::tx(static function () use ($orderId, $minutes): array {
+            $o = Orders::editable($orderId);
+            if ($o['channel'] !== 'online' || $o['status'] !== 'pending') {
+                throw new \InvalidArgumentException(I18n::t('qr.err_handled'));
+            }
+            if (!QrOrders::complete($o)) {
+                throw new \InvalidArgumentException(I18n::t('sync.err_incomplete'));
+            }
+            $minutes = max(5, min(240, $minutes ?: self::etaMid()));
+            $d = $o['delivery'];
+            $d['eta_at'] = Clock::ms() + $minutes * 60_000;
+            $d['approved_at'] = Clock::ms();
+            Db::save('orders', ['id' => $orderId, 'delivery' => $d, 'approved_at' => Clock::ms()]);
+            Delivery::move($orderId, 'approve');
+            return $d;
+        });
         Notify::closeFor($orderId, 'online');
         if (($d['type'] ?? 'delivery') === 'delivery') {
             \Sofrexa\Modules\Orders\Tickets::courier($orderId);
@@ -304,7 +315,8 @@ final class OnlineOrders
         if (!$readyAt && $lines && !array_filter($lines, static fn(array $l): bool => !in_array($l['status'], ['ready', 'served'], true))) {
             $readyAt = max(array_map(static fn(array $l): int => (int) ($l['ready_at'] ?: $l['served_at']), $lines)) ?: null;
         }
-        $doneAt = $d['done_at'] ?? ($o['status'] === 'paid' ? $o['closed_at'] : null);
+        // handed over, not paid: a bag paid in advance is not "delivered" until it is (audit 7, E02)
+        $doneAt = $d['done_at'] ?? (Delivery::handedOver($o) ? Delivery::plates($o['id'])['served_at'] : null);
         $stage = match (true) {
             $o['status'] === 'void' => 'cancelled',
             $o['status'] === 'pending' => 'received',

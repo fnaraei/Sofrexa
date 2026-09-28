@@ -4,7 +4,8 @@
   'use strict';
   const S = window.SOFREXA;
   const parse = s => {
-    s = String(s || '').trim().replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٬\s₺]/g, '').replace('٫', ',');
+    s = String(s || '').trim().replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+      .replace(/[٬\s₺]/g, '').replace(/٫/g, ',').replace(/−/g, '-');
     if (s.indexOf(',') !== -1) s = s.replace(/\./g, '').replace(',', '.');
     else if ((s.match(/\./g) || []).length > 1 || /\.\d{3}$/.test(s)) s = s.replace(/\./g, '');
     const v = parseFloat(s);
@@ -245,7 +246,9 @@
       let total = 0;
       S.$$('[data-rline]', box).forEach(row => {
         const q = parse(row.querySelector('[data-rqty]').value) || 0;
-        const c = Math.round(q * parseFloat(row.dataset.cost));
+        // "Fire %": the part lost preparing it — the line takes q / (1 − fire) from stock, as Stock::gross on the server
+        const w = Math.min(90, Math.max(0, parse((row.querySelector('[name$="[waste_pct]"]') || {}).value) || 0));
+        const c = Math.round(q / (1 - w / 100) * parseFloat(row.dataset.cost));
         row.querySelector('[data-rcost]').textContent = S.money(Math.round(c / 100) * 100);
         total += c;
       });

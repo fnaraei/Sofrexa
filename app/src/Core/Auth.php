@@ -46,13 +46,16 @@ final class Auth
             $uid = $_SESSION['uid'] ?? null;
             if ($uid) {
                 $u = Db::row('SELECT u.*, r.code AS role_code, r.name AS role_name, r.perms AS role_perms FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.active = 1 AND u.deleted = 0', [$uid]);
-                // the session remembers the password hash it was opened with, so changing a password ends the old
-                // sessions. Most staff sign in by PIN and have no password at all: null must match null, so the
-                // left side is compared as it is — coercing it to '' locked every one of them straight out again.
-                if ($u && $u['password_hash'] === ($_SESSION['pwv'] ?? $u['password_hash'])) {
+                // the session remembers the credentials it was opened with (PIN and password), so a new PIN or password
+                // ends every session opened with the old one — a PIN someone saw stops working on their phone too
+                // (a session from before this rule kept only the password hash: it is checked that way, once)
+                $ok = $u && (isset($_SESSION['cv']) ? hash_equals($_SESSION['cv'], self::credentials($u)) : $u['password_hash'] === ($_SESSION['pwv'] ?? $u['password_hash']));
+                if ($ok) {
+                    $_SESSION['cv'] = self::credentials($u);
                     self::$user = self::withPerms($u);
                 } else {
-                    unset($_SESSION['uid']);
+                    unset($_SESSION['uid'], $_SESSION['cv'], $_SESSION['pwv']);
+                    self::$user = null;
                 }
             }
         }
@@ -132,7 +135,7 @@ final class Auth
     {
         session_regenerate_id(true);
         $_SESSION['uid'] = $u['id'];
-        $_SESSION['pwv'] = $u['password_hash'];
+        $_SESSION['cv'] = self::credentials($u);
         $_SESSION['kind'] = $kind;
         Db::update('users', ['failed_pins' => 0, 'locked_until' => 0, 'last_login_at' => Clock::ms()], 'id = ?', [$u['id']]);
         self::$loaded = false;
@@ -145,7 +148,7 @@ final class Auth
         if ($u = self::user()) {
             Audit::log('auth.logout', $u['name'], 'user', $u['id']);
         }
-        unset($_SESSION['uid'], $_SESSION['pwv'], $_SESSION['kind']);
+        unset($_SESSION['uid'], $_SESSION['cv'], $_SESSION['pwv'], $_SESSION['kind']);
         session_regenerate_id(true);
         self::$user = null;
     }
@@ -163,5 +166,20 @@ final class Auth
     public static function hashPin(string $pin): string
     {
         return password_hash($pin, PASSWORD_DEFAULT);
+    }
+
+    /** A fingerprint of what a user signs in with: it changes with a new PIN or password (the hashes themselves stay put). */
+    private static function credentials(array $u): string
+    {
+        return hash('sha256', 'pin:' . ($u['pin_hash'] ?? '') . '|pw:' . ($u['password_hash'] ?? ''));
+    }
+
+    /** The signed-in user changed their own PIN or password: this session goes on, every other one of theirs ends. */
+    public static function renew(): void
+    {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid && ($u = Db::row('SELECT id, pin_hash, password_hash FROM users WHERE id = ?', [$uid]))) {
+            $_SESSION['cv'] = self::credentials($u);
+        }
     }
 }

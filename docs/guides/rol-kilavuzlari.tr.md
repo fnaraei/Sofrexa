@@ -44,9 +44,9 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 - **Fazla ödeme:** ödemenin bir kısmı alındıktan sonra bir ürün iptal edilir ve müşteri hesaptan fazla ödemiş olursa, ödeme ekranı para almak yerine **iade** gösterir: hesap, ödenen ve iade edilecek tutar. **Nakit iade** (kasadan) veya **Karta iade** (POS cihazından) seç, **İade et ve kapat**. İade, o vardiyaya ve işlem kaydına geçer. Fark **cari hesaptan** ödenmişse kasadan para çıkmaz: tutar müşterinin borcundan düşülür, düğme **Borçtan düş ve kapat** olur (karışık ödemede önce cari kısım borçtan düşülür, yalnızca kalanı nakit ya da karta iade edilir). Hesap birden fazla müşterinin carisine yazıldıysa ekran her biri için adı, düşülen tutarı ve yeni bakiyeyi ayrı gösterir. Karta, kartla ödenenden fazlası iade edilmez. İptalden sonra yeni ürün eklendiyse iade önce onu mutfağa gönderir.
 - **Hesap birleştirme ve bölme:** indirimler o anda sabit tutara çevrilir, böylece toplam kuruşu kuruşuna aynı kalır; birleştirme ya da bölmeden sonra eklenen ürüne önceki yüzde indirimi uygulanmaz.
 
-**Paket ve teslimat:** **Paket & Teslimat → Yeni** → müşteri (telefonla), adres, ürünler, ödeme şekli, kurye. Kurye dönünce **Kuryeler → hesaplaş → Teslim alındı**. Hazır olan paket, ödemesi alınmış olsa bile müşteriye verilene kadar kasayı çağırır; teslimat paketi **Yolda** ile (kurye çıkınca) teslim edilmiş sayılır.
+**Paket ve teslimat:** **Paket & Teslimat → Yeni** → müşteri (telefonla), adres, ürünler, ödeme şekli, kurye. Kurye dönünce **Kuryeler → hesaplaş → Teslim alındı**. Hazır olan paket, ödemesi alınmış olsa bile müşteriye verilene kadar kasayı çağırır; teslimat paketi **Yolda** ile (kurye çıkınca) teslim edilmiş sayılır. Teslimatta paket ücreti fişte ayrı bir kalemdir. Panodaki **Hazır**, mutfağın “Hazır”ıdır; yemeği henüz pişmemiş paket **Yolda** olamaz, yola çıkmış pakete yeni ürün eklenmez (yeni sipariş açın). Yola çıkmadan ödemesi alınan sipariş teslim edilene kadar panoda kalır.
 
-**Kasa hareketleri:** para girişi / çıkışı sebebiyle kaydedilir, silinmez; yanlış kayıt **Ters kayıt** ile düzeltilir. Satışsız çekmece açma da kayda geçer.
+**Kasa hareketleri:** para girişi / çıkışı sebebiyle kaydedilir, silinmez; yanlış kayıt **Ters kayıt** ile düzeltilir; vardiyası kapanmışsa düzeltme açık vardiyaya, Z numarasıyla yazılır ve açık vardiya yoksa yapılamaz. Nakit her ödeme (gider, maaş, mal alışı) yalnızca kasa bilgisayarında ve açık vardiyada kaydedilir. Satışsız çekmece açma da kayda geçer.
 
 **İptal edilen yemek (Hazır iptaller):** mutfağa gitmiş bir yemek aşçı "hazır" demeden iptal edilirse "… iptal edildi · mutfağa sorun" bildirimi gelir. Mutfağa sorun:
 - Henüz hazırlanmadıysa → **Hazırlanmadı · stoka dön** (malzemeler stoka döner)
@@ -95,13 +95,13 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 
 **Her gün:** **Özet** (telefonda **Bugün**): satış, açık masalar, saatlik satış, dikkat listesi (kritik stok, iptaller, eski kur, web senkronu). **Gün sonu raporu** Z raporlarını gösterir (80 mm yazdır, PDF).
 
-**Menü:** fiyatlar tek tek veya toplu (**Fiyat ve stok**); günlük stok sınırı; ürün fotoğrafı; reçete ve maliyet (**Reçete**).
+**Menü:** fiyatlar tek tek veya toplu (**Fiyat ve stok**); günlük stok sınırı; ürün fotoğrafı; reçete ve maliyet (**Reçete**). Reçetedeki miktar tabağa giren miktardır; **Fire %** hazırlarken kaybolan kısımdır: %20 fireyle 100 g, stoktan 125 g düşer ve öyle maliyetlenir.
 
 **Depo:** kritik ürünler, alış, sayım, fire, alışveriş listesi (WhatsApp'la paylaşılır).
 
 **Müşteriler:** cari hesaplar ve ekstre; **Sadakat programı**'nda puan değeri, seviyeler (Bronz / Gümüş / Altın: eşik, indirim %, puan %) ve kurallar; müşterinin seviyesi elle de verilebilir.
 
-**Personel:** rol, prim oranı, sabit maaş, yetkiler; PIN sıfırlama; **Maaş ve prim** (avans / ödeme, Excel).
+**Personel:** rol, prim oranı, sabit maaş, yetkiler; PIN sıfırlama; **Maaş ve prim** (avans / ödeme, Excel). Maaş veya prim değişikliği bu aydan geçerlidir; geçmiş ayların hakedişi değişmez. Yeni PIN ya da şifre o kişinin tüm eski oturumlarını kapatır. Yönetici dışında personel yetkisi olan biri yalnızca kendi sahip olduğu yetkileri verebilir ve yönetici hesabını değiştiremez.
 
 **Raporlar:** satış, personel performansı, iptaller, stok hareketleri. **Finans:** giderler (kira, enerji… tekrarlayan olarak da), kâr / zarar.
 

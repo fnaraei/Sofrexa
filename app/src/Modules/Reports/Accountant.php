@@ -150,14 +150,8 @@ final class Accountant
         }
         if (in_array('csv', $formats, true)) {
             foreach ($tables as $key => [$title, $head, $rows]) {
-                $h = fopen('php://temp', 'w+');
-                fwrite($h, "\xEF\xBB\xBF");
-                fputcsv($h, $head, ';', '"', '');
-                foreach ($rows as $r) {
-                    fputcsv($h, array_map(static fn($v): string => is_float($v) ? number_format($v, 2, ',', '') : (string) $v, $r), ';', '"', '');
-                }
-                rewind($h);
-                $zip->addFromString($base . '-' . $key . '.csv', (string) stream_get_contents($h));
+                $zip->addFromString($base . '-' . $key . '.csv', \Sofrexa\Export\Csv::build($head,
+                    array_map(static fn(array $r): array => array_map(static fn($v): string => is_float($v) ? number_format($v, 2, ',', '') : (string) $v, $r), $rows)));
             }
         }
         if (in_array('pdf', $formats, true)) {

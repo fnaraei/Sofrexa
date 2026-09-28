@@ -325,6 +325,7 @@ return [
     'fin.no_shift_hint' => ['“Kasadan” ödeme için açık kasa vardiyası gerekir.', 'Paying “from the till” needs an open till shift.', 'پرداخت «از صندوق» شیفت صندوق باز لازم دارد.', 'Для оплаты из кассы нужна открытая смена.'],
     'fin.err_amount' => ['Tutarı girin', 'Enter the amount', 'مبلغ را وارد کنید', 'Введите сумму'],
     'fin.err_category' => ['Kategori seçin', 'Pick a category', 'دسته را انتخاب کنید', 'Выберите категорию'],
+    'fin.correction' => ['Düzeltme · {text}', 'Correction · {text}', 'اصلاح · {text}', 'Исправление · {text}'],
     'fin.err_no_shift' => ['Kasadan ödeme için açık vardiya yok', 'No open till shift to pay from', 'برای پرداخت از صندوق شیفت بازی نیست', 'Нет открытой смены кассы'],
     'fin.by' => ['Kaydeden', 'Recorded by', 'ثبت‌کننده', 'Записал'],
     'fin.reverse' => ['Kaydı iptal et', 'Cancel the entry', 'لغو ثبت', 'Сторнировать'],

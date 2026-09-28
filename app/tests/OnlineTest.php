@@ -137,6 +137,7 @@ return [
         same(['done', 'done', 'current', 'pending', 'pending'], array_column($t['steps'], 0));
         same($before + 2, $mails(), '"accepted" e-mail with the time');
         check(Delivery::isDelivery($o), 'goes with a courier');
+        Delivery::move($id, 'ready'); // the bag leaves only with its dishes ready (audit 7, E03)
         try {
             Delivery::move($id, 'way');
             throw new LogicException('out without a courier');

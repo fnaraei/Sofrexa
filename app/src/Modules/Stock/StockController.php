@@ -146,8 +146,8 @@ final class StockController
         }
         $lines = [];
         foreach (Stock::recipe($kind, $id) as $l) {
-            $l['cost'] = (int) round((float) $l['qty'] * Stock::unitCost($l['stock_item_id']));
-            $l['children'] = $l['item_kind'] === 'semi' ? array_map(static fn(array $c): array => $c + ['cost' => (int) round((float) $c['qty'] * (float) $l['qty'] * Stock::unitCost($c['stock_item_id']))], Stock::recipe('stock', $l['stock_item_id'])) : [];
+            $l['cost'] = (int) round(Stock::gross($l) * Stock::unitCost($l['stock_item_id']));
+            $l['children'] = $l['item_kind'] === 'semi' ? array_map(static fn(array $c): array => $c + ['cost' => (int) round(Stock::gross($c) * Stock::gross($l) * Stock::unitCost($c['stock_item_id']))], Stock::recipe('stock', $l['stock_item_id'])) : [];
             $lines[] = $l;
         }
         View::page('stock/recipe', ['title' => I18n::t('rec.title', ['name' => $head['name']]), 'nav' => $kind === 'item' ? 'menu' : 'stock', 'kind' => $kind, 'id' => $id,
@@ -163,8 +163,8 @@ final class StockController
             if (!is_array($l) || ($l['stock_item_id'] ?? '') === '') {
                 continue;
             }
-            $f = max(1.0, (float) ($l['factor'] ?? 1));
-            $lines[] = ['stock_item_id' => (string) $l['stock_item_id'], 'qty' => (float) str_replace(',', '.', (string) ($l['qty'] ?? 0)) / $f, 'waste_pct' => $l['waste_pct'] ?? 0];
+            $f = max(1.0, read_num($l['factor'] ?? 1, 'factor', 1.0));
+            $lines[] = ['stock_item_id' => (string) $l['stock_item_id'], 'qty' => read_num($l['qty'] ?? 0, 'qty') / $f, 'waste_pct' => $l['waste_pct'] ?? 0];
         }
         Stock::setRecipe($kind, $req->param('id'), $lines);
         $cost = $kind === 'item' ? Stock::itemCost($req->param('id'))['total'] : (int) round(Stock::unitCost($req->param('id')));

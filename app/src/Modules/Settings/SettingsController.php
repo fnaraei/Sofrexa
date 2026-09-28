@@ -83,9 +83,9 @@ final class SettingsController
             $v = $in[$k] ?? null;
             $values[$k] = match ($type) {
                 'bool' => !empty($v),
-                'int' => max(0, min(600, (int) $v)),
-                'hour' => max(0, min(23, (int) $v)),
-                'pct' => max(0, min(100, (float) str_replace(',', '.', (string) $v))),
+                'int' => max(0, min(600, (int) read_num($v, $k))),
+                'hour' => max(0, min(23, (int) read_num($v, $k))),
+                'pct' => max(0, min(100, read_num($v, $k))),
                 'money' => max(0, Money::parse((string) $v)),
                 'langs' => array_values(array_intersect(array_keys(I18n::LANGS), (array) $v)),
                 'nets' => array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', (string) $v) ?: []))),
@@ -318,7 +318,7 @@ final class SettingsController
     private static function saveVat(array $cats, array &$changes): void
     {
         foreach ($cats as $id => $rate) {
-            $rate = max(0, min(100, (float) str_replace(',', '.', (string) $rate)));
+            $rate = max(0, min(100, read_num($rate, 'vat')));
             $old = Db::row('SELECT names, vat_rate FROM categories WHERE id = ? AND deleted = 0', [(string) $id]);
             if ($old && abs((float) $old['vat_rate'] - $rate) > 0.001) {
                 Db::save('categories', ['id' => (string) $id, 'vat_rate' => $rate]);

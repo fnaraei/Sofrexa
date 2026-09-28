@@ -52,7 +52,7 @@ $online = $o['channel'] === 'online';
           <?php if ($stage === 'kitchen'): ?><?= Ui::lrow(t('deliv.a_ready'), ['icon' => 'bell', 'attrs' => ['data-post' => $base . '/move/ready', 'data-action' => 'ready']]) ?><?php endif ?>
           <?php if ($isDelivery && in_array($stage, ['kitchen', 'ready'], true)): ?><?= Ui::lrow(t('deliv.a_out'), ['icon' => 'bike', 'attrs' => ['data-post' => $base . '/move/way', 'data-action' => 'way']]) ?><?php endif ?>
           <?php if ($isDelivery && $stage === 'way'): ?><?= Ui::lrow(t('deliv.a_done'), ['icon' => 'check-circle', 'attrs' => ['data-post' => $base . '/move/done', 'data-action' => 'done']]) ?><?php endif ?>
-          <?php if (!$isDelivery || !in_array($stage, ['way', 'done'], true)): ?><?= Ui::lrow(t('deliv.a_pay'), ['icon' => 'cash', 'href' => '/cashier/pay/' . $o['id']]) ?><?php endif ?>
+          <?php if ((int) $o['paid'] < (int) $o['total'] && (!$isDelivery || !in_array($stage, ['way', 'done'], true))): ?><?= Ui::lrow(t('deliv.a_pay'), ['icon' => 'cash', 'href' => '/cashier/pay/' . $o['id']]) ?><?php endif ?>
           <?php if ($isDelivery): ?><?= Ui::lrow(t('deliv.a_ticket'), ['icon' => 'printer', 'attrs' => ['data-post' => $base . '/slip', 'data-action' => 'slip']]) ?><?php endif ?>
           <?= Ui::lrow(t('deliv.a_edit'), ['icon' => 'receipt', 'href' => '/orders/' . $o['id']]) ?>
           <?php if (can('orders.void') && (int) $o['paid'] === 0): ?><?= Ui::lrow(t('deliv.a_cancel'), ['icon' => 'x-circle', 'attrs' => ['data-post' => $base . '/move/reject', 'data-confirm' => t('js.confirm'), 'data-action' => 'cancel']]) ?><?php endif ?>

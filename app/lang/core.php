@@ -78,6 +78,7 @@ return [
 
     'err.title' => ['Bir sorun oluştu', 'Something went wrong', 'مشکلی پیش آمد', 'Что-то пошло не так'],
     'err.server' => ['Beklenmeyen bir hata oldu. Lütfen tekrar deneyin.', 'An unexpected error occurred. Please try again.', 'خطای غیرمنتظره‌ای رخ داد. دوباره تلاش کنید.', 'Произошла ошибка. Попробуйте ещё раз.'],
+    'err.number' => ['Geçerli bir sayı girin', 'Enter a valid number', 'یک عدد معتبر وارد کنید', 'Введите корректное число'],
     'err.forbidden' => ['Bu işlem için yetkiniz yok.', 'You do not have permission for this.', 'اجازهٔ این کار را ندارید.', 'Нет прав на это действие.'],
     'err.not_found' => ['Sayfa bulunamadı.', 'Page not found.', 'صفحه پیدا نشد.', 'Страница не найдена.'],
     'err.csrf' => ['Oturum süresi doldu, sayfayı yenileyin.', 'Session expired — reload the page.', 'نشست منقضی شد؛ صفحه را دوباره باز کنید.', 'Сессия истекла — обновите страницу.'],

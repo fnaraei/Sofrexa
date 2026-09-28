@@ -40,7 +40,7 @@ $open = static fn(string $orderId): array => array_column(Db::rows('SELECT kind 
 /** The database as it was just before 018: no called_at column, and 018 (and what came after it) not yet run. */
 $before018 = static function (): void {
     Db::exec('ALTER TABLE order_items DROP COLUMN called_at');
-    Db::exec("DELETE FROM schema_migrations WHERE name >= '018'");
+    Db::exec("DELETE FROM schema_migrations WHERE name IN ('018_called', '019_called_repair')");
 };
 
 return [

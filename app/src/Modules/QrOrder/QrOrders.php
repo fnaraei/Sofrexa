@@ -231,9 +231,17 @@ final class QrOrders
                 continue; // the rest of its lines come with the next sync batch
             }
             $s = $o['qr_session_id'] ? Db::row('SELECT * FROM qr_sessions WHERE id = ?', [$o['qr_session_id']]) : null;
-            if (!self::needsApproval($s && !$s['closed_at'] ? $s : null, $o['qr_device'])) {
-                self::accept($o['id'], null);
-            } else {
+            $direct = !self::needsApproval($s && !$s['closed_at'] ? $s : null, $o['qr_device']);
+            try {
+                if ($direct) {
+                    self::accept($o['id'], null);
+                }
+            } catch (\InvalidArgumentException | \Sofrexa\Core\ValidationError) {
+                // it cannot go to the kitchen as it is (a dish run out since): nothing of it was taken, and it waits for
+                // the waiter like an order to approve, instead of being tried again at every sync round
+                $direct = false;
+            }
+            if (!$direct) {
                 Db::save('orders', ['id' => $o['id'], 'intake_at' => Clock::ms()]);
                 self::alert($o['id']);
             }
@@ -281,37 +289,44 @@ final class QrOrders
      */
     public static function accept(string $orderId, ?string $userId): string
     {
-        $o = self::pendingOrder($orderId);
+        self::pendingOrder($orderId);
         $now = Clock::ms();
-        $lines = array_column(Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId]), 'id');
-        // the waiter who approved, the one the order was shared out to, or — when neither — the least busy on shift
-        $pick = $userId ?: ($o['waiter_id'] ?: Assign::pick());
-        $target = Db::tx(static function () use ($o, $userId, $now, $lines, $pick): string {
-            if ($userId && $o['qr_session_id'] && ($s = Db::row('SELECT approved_at, devices FROM qr_sessions WHERE id = ?', [$o['qr_session_id']]))) {
-                // the waiter saw this phone's order: the phone may order on its own from now on
-                $devices = json_arr((string) $s['devices']);
-                if ($o['qr_device'] && !in_array($o['qr_device'], $devices, true)) {
-                    $devices[] = $o['qr_device'];
+        // one step (audit 8, O14): the approval, the phone trusted from now on, the lines joining the table's bill and
+        // going to the kitchen — all or nothing. A dish run out since the guest ordered refuses the whole approval and the
+        // order stays waiting, to be approved again once the dish is back or its line changed.
+        [$o, $target] = Db::tx(static function () use ($orderId, $userId, $now): array {
+            $o = self::pendingOrder($orderId); // read inside the lock: approved once, whoever taps
+            $lines = array_column(Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId]), 'id');
+            // the waiter who approved, the one the order was shared out to, or — when neither — the least busy on shift
+            $pick = $userId ?: ($o['waiter_id'] ?: Assign::pick());
+            $target = Db::tx(static function () use ($o, $userId, $now, $lines, $pick): string {
+                if ($userId && $o['qr_session_id'] && ($s = Db::row('SELECT approved_at, devices FROM qr_sessions WHERE id = ?', [$o['qr_session_id']]))) {
+                    // the waiter saw this phone's order: the phone may order on its own from now on
+                    $devices = json_arr((string) $s['devices']);
+                    if ($o['qr_device'] && !in_array($o['qr_device'], $devices, true)) {
+                        $devices[] = $o['qr_device'];
+                    }
+                    Db::save('qr_sessions', ['id' => $o['qr_session_id'], 'devices' => array_values($devices)]
+                        + ($s['approved_at'] ? [] : ['approved_at' => $now, 'approved_by' => $userId]));
                 }
-                Db::save('qr_sessions', ['id' => $o['qr_session_id'], 'devices' => array_values($devices)]
-                    + ($s['approved_at'] ? [] : ['approved_at' => $now, 'approved_by' => $userId]));
-            }
-            $stamp = ['id' => $o['id'], 'intake_at' => $o['intake_at'] ?: $now, 'approved_at' => $now, 'approved_by' => $userId];
-            $main = self::mainOrder((string) $o['table_id'], $o['id']);
-            if (!$main) {
-                Db::save('orders', $stamp + ['status' => 'open', 'waiter_id' => $pick]
-                    + ($pick && !$o['assigned_at'] ? ['assigned_at' => $now] : []));
-                return $o['id'];
-            }
-            foreach ($lines as $id) {
-                Db::save('order_items', ['id' => $id, 'order_id' => $main['id']]);
-            }
-            Db::save('orders', $stamp + ['status' => 'void', 'closed_at' => $now, 'merged_into' => $main['id']]);
-            Orders::recalc($o['id']);
-            return $main['id'];
+                $stamp = ['id' => $o['id'], 'intake_at' => $o['intake_at'] ?: $now, 'approved_at' => $now, 'approved_by' => $userId];
+                $main = self::mainOrder((string) $o['table_id'], $o['id']);
+                if (!$main) {
+                    Db::save('orders', $stamp + ['status' => 'open', 'waiter_id' => $pick]
+                        + ($pick && !$o['assigned_at'] ? ['assigned_at' => $now] : []));
+                    return $o['id'];
+                }
+                foreach ($lines as $id) {
+                    Db::save('order_items', ['id' => $id, 'order_id' => $main['id']]);
+                }
+                Db::save('orders', $stamp + ['status' => 'void', 'closed_at' => $now, 'merged_into' => $main['id']]);
+                Orders::recalc($o['id']);
+                return $main['id'];
+            });
+            Orders::send($target, $lines);
+            Orders::recalc($target);
+            return [$o, $target];
         });
-        Orders::send($target, $lines);
-        Orders::recalc($target);
         if ($target === $orderId) {
             Notify::closeFor($orderId, 'qr'); // it is the table's bill now: only its "approve" alert is over
         } else {

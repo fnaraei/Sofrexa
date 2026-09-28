@@ -228,7 +228,7 @@ final class Customers
                 $row['credit_limit'] = max(0, Money::parse((string) $in['credit_limit']));
             }
             if (array_key_exists('discount_pct', $in)) {
-                $row['discount_pct'] = max(0, min(100, (float) str_replace(',', '.', (string) $in['discount_pct'])));
+                $row['discount_pct'] = max(0, min(100, read_num($in['discount_pct'], 'discount_pct')));
             }
             if (array_key_exists('blacklist', $in) || $old) {
                 $row['blacklist'] = !empty($in['blacklist']) ? 1 : 0;
@@ -410,17 +410,11 @@ final class Customers
     /** CSV of the list ("Dışa aktar"), Excel-friendly (BOM, semicolons). */
     public static function csv(array $rows): string
     {
-        $h = fopen('php://temp', 'w+');
-        fwrite($h, "\xEF\xBB\xBF");
-        fputcsv($h, ['Ad', 'Telefon', 'E-posta', 'Şirket', 'Vergi no', 'Etiket', 'Sipariş', 'Son ziyaret', 'Bakiye', 'Puan', 'Seviye'], ';', '"', '');
         $tiers = array_column(Loyalty::tiers(), 'name', 'id');
-        foreach ($rows as $r) {
-            fputcsv($h, [$r['name'], $r['phone'], $r['email'], $r['company'], $r['tax_no'], $r['tag'] !== '' ? I18n::t('cust.tag.' . $r['tag'], [], 'tr') : '',
+        return \Sofrexa\Export\Csv::build(['Ad', 'Telefon', 'E-posta', 'Şirket', 'Vergi no', 'Etiket', 'Sipariş', 'Son ziyaret', 'Bakiye', 'Puan', 'Seviye'],
+            array_map(static fn(array $r): array => [$r['name'], $r['phone'], $r['email'], $r['company'], $r['tax_no'], $r['tag'] !== '' ? I18n::t('cust.tag.' . $r['tag'], [], 'tr') : '',
                 $r['orders_n'], $r['last_at'] ? date('d.m.Y', intdiv($r['last_at'], 1000)) : '',
                 // a customer with no tier has no tier_id: null is not a key (PHP 8.5 says so)
-                number_format($r['balance'] / 100, 2, ',', '.'), Loyalty::balance($r['id']), $r['tier_id'] !== null ? ($tiers[$r['tier_id']] ?? '') : ''], ';', '"', '');
-        }
-        rewind($h);
-        return (string) stream_get_contents($h);
+                number_format($r['balance'] / 100, 2, ',', '.'), Loyalty::balance($r['id']), $r['tier_id'] !== null ? ($tiers[$r['tier_id']] ?? '') : ''], $rows));
     }
 }
