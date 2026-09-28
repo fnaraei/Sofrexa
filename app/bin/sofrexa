@@ -1,0 +1,99 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Sofrexa command line.
+ *
+ *   php app/bin/sofrexa migrate
+ *   php app/bin/sofrexa seed [--demo]                 roles, tiers, settings (+ demo staff, tables, customers)
+ *   php app/bin/sofrexa user:add "Name" manager 1234 [email] [password]
+ *   php app/bin/sofrexa import:website <site.sqlite> <uploads-dir>   menu + photos from the restaurant website
+ *   php app/bin/sofrexa serve [port]                  development server (PHP built-in)
+ *   php app/bin/sofrexa backup | restore <file>
+ *   php app/bin/sofrexa sync [--loop]                 PC → web copy replication
+ *   php app/bin/sofrexa nightly                       tiers, recurring expenses, backup
+ *   php app/bin/sofrexa print:worker [--loop]         send queued tickets to the printers
+ *   php app/bin/sofrexa test                          run the test suite
+ */
+declare(strict_types=1);
+
+require __DIR__ . '/../bootstrap.php';
+
+use Sofrexa\Core\Migrator;
+
+$cmd = $argv[1] ?? 'help';
+$args = array_slice($argv, 2);
+$say = static fn(string $m) => fwrite(STDOUT, $m . "\n");
+
+try {
+    switch ($cmd) {
+        case 'migrate':
+            $n = Migrator::run($say);
+            $say($n ? "$n migration(s) applied." : 'Database is up to date.');
+            break;
+        case 'seed':
+            Migrator::run($say);
+            Sofrexa\Setup\Seed::base($say);
+            if (in_array('--demo', $args, true)) {
+                Sofrexa\Setup\Seed::demo($say);
+            }
+            break;
+        case 'user:add':
+            Migrator::run();
+            [$name, $role, $pin] = [$args[0] ?? '', $args[1] ?? 'manager', $args[2] ?? ''];
+            $id = Sofrexa\Setup\Seed::user($name, $role, $pin, $args[3] ?? null, $args[4] ?? null);
+            $say("User $name ($role) created: $id");
+            break;
+        case 'import:website':
+            Migrator::run();
+            Sofrexa\Setup\WebsiteImport::run($args[0] ?? '', $args[1] ?? '', $say);
+            break;
+        case 'serve':
+            $port = (int) ($args[0] ?? 8090);
+            $pub = realpath(__DIR__ . '/../public');
+            $say("Sofrexa on http://127.0.0.1:$port  (Ctrl+C to stop)");
+            passthru(escapeshellarg(PHP_BINARY) . " -S 0.0.0.0:$port -t " . escapeshellarg($pub) . ' ' . escapeshellarg($pub . '/index.php'));
+            break;
+        case 'backup':
+            Migrator::run();
+            $file = Sofrexa\Modules\Backup\Backup::create('manual-cli');
+            $say("Backup written: $file");
+            break;
+        case 'restore':
+            $file = Sofrexa\Modules\Backup\Backup::restore($args[0] ?? '');
+            $say("Restored. Safety copy of the previous state: $file");
+            break;
+        case 'sync':
+            Migrator::run();
+            do {
+                $r = Sofrexa\Sync\Client::round();
+                $say(date('H:i:s') . ' ' . json_encode($r));
+                if (in_array('--loop', $args, true)) {
+                    sleep((int) Sofrexa\Core\App::config('sync.interval', 3));
+                }
+            } while (in_array('--loop', $args, true));
+            break;
+        case 'nightly':
+            Migrator::run();
+            Sofrexa\Setup\Nightly::run($say);
+            break;
+        case 'print:worker':
+            Migrator::run();
+            do {
+                $n = Sofrexa\Print\Spooler::work();
+                if ($n) {
+                    $say(date('H:i:s') . " printed $n job(s)");
+                }
+                if (in_array('--loop', $args, true)) {
+                    usleep(700_000);
+                }
+            } while (in_array('--loop', $args, true));
+            break;
+        case 'test':
+            exit(require __DIR__ . '/../tests/run.php');
+        default:
+            $say(trim((string) preg_replace('/^\s*\*\s?/m', '', explode('*/', explode('/**', (string) file_get_contents(__FILE__))[1])[0])));
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ")\n");
+    exit(1);
+}

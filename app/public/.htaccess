@@ -1,0 +1,12 @@
+# Apache (host / web copy): send everything that is not a real file to index.php.
+Options -Indexes
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ index.php [L,QSA]
+</IfModule>
+<IfModule mod_headers.c>
+  <FilesMatch "\.(css|js|woff2|png|svg|webp|jpg)$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+</IfModule>
