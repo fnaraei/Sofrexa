@@ -16,6 +16,7 @@ $kinds = [
     'bill' => ['warning', 'receipt'],
     'call' => ['info', 'hand'],
     'served' => ['success', 'check-circle'],
+    'online' => ['attention', 'globe'],
 ];
 $ago = static function (int $at): string {
     $m = intdiv(Clock::ms() - $at, 60_000);
@@ -42,6 +43,7 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
           'qr' => $n['ref_id'] ? Ui::btn(t('notif.review'), ['size' => 's', 'attrs' => ['data-load-sheet' => '/qr/orders/' . $n['ref_id']]]) : Ui::btn(t('notif.review'), ['size' => 's', 'href' => '/tables']),
           'bill' => Ui::btn(t('notif.prebill'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/prebill']]),
           'call' => Ui::btn(t('notif.going'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
+          'online' => $n['ref_id'] ? Ui::btn(t('notif.review'), ['size' => 's', 'attrs' => ['data-load-sheet' => '/delivery/' . $n['ref_id'] . '/sheet']]) : Ui::btn(t('notif.review'), ['size' => 's', 'href' => '/delivery']),
           default => Ui::btn(t('notif.open'), ['size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
       }; ?>
     <article class="ncard<?= $n['read_at'] ? '' : ' is-new' ?>">

@@ -36,6 +36,7 @@ final class Client
         }
         // guest QR orders made on the web copy: to the kitchen or to a waiter for approval; the result goes back in this push
         \Sofrexa\Modules\QrOrder\QrOrders::intake();
+        \Sofrexa\Modules\Online\OnlineOrders::intake();
 
         $outbox = Db::rows('SELECT seq, tbl, row_id FROM sync_outbox ORDER BY seq LIMIT ' . self::BATCH);
         $rows = Apply::collect($outbox);

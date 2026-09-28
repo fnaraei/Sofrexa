@@ -83,6 +83,13 @@ final class Delivery
         return $orderId;
     }
 
+    /** A courier takes it: phone delivery, or an online order for delivery. */
+    public static function isDelivery(array $o): bool
+    {
+        $d = is_array($o['delivery'] ?? null) ? $o['delivery'] : json_arr($o['delivery'] ?? null);
+        return $o['channel'] === 'delivery' || ($o['channel'] === 'online' && ($d['type'] ?? '') === 'delivery');
+    }
+
     public static function isCourier(string $userId): bool
     {
         return (bool) Db::value("SELECT 1 FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND r.code = 'courier' AND u.active = 1 AND u.deleted = 0", [$userId]);
@@ -143,7 +150,7 @@ final class Delivery
                 $d['ready_at'] = $now;
                 break;
             case 'way':
-                if ($o['channel'] === 'delivery' && empty($d['courier_id'])) {
+                if (self::isDelivery($o) && empty($d['courier_id'])) {
                     throw new ValidationError(['courier' => I18n::t('deliv.a_courier')]);
                 }
                 $d['stage'] = 'way';
@@ -177,7 +184,7 @@ final class Delivery
         $rows = Db::rows("SELECT u.id, u.name FROM users u JOIN roles r ON r.id = u.role_id WHERE r.code = 'courier' AND u.active = 1 AND u.deleted = 0 ORDER BY u.name");
         $open = self::open();
         foreach ($rows as &$c) {
-            $c['today'] = (int) Db::value("SELECT COUNT(*) FROM orders WHERE channel = 'delivery' AND day = ? AND status <> 'void' AND deleted = 0 AND json_extract(delivery, '$.courier_id') = ?", [$day, $c['id']]);
+            $c['today'] = (int) Db::value("SELECT COUNT(*) FROM orders WHERE channel IN ('delivery', 'online') AND day = ? AND status <> 'void' AND deleted = 0 AND json_extract(delivery, '$.courier_id') = ?", [$day, $c['id']]);
             $c['out'] = false;
             $c['cash'] = ['TRY' => 0];
             $c['orders'] = [];

@@ -12,7 +12,7 @@ use Sofrexa\Core\{Auth, Clock, Db};
  */
 final class Notify
 {
-    public const KINDS = ['ready', 'qr', 'bill', 'call', 'served'];
+    public const KINDS = ['ready', 'qr', 'bill', 'call', 'served', 'online'];
 
     public static function push(string $kind, array $params, ?string $userId = null, ?string $role = null, ?string $orderId = null): string
     {

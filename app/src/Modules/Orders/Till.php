@@ -87,11 +87,16 @@ final class Till
                 break;
             case 'online':
                 $c['icon'] = 'globe';
-                $c['sub'] = t('cash.sub_pickup', ['who' => $customer, 'time' => digits((string) ($o['delivery']['pickup_at'] ?? $when((int) $o['opened_at'])))]);
+                if (Delivery::isDelivery($o)) {
+                    $district = trim(explode(',', (string) ($o['delivery']['address'] ?? ''))[0]);
+                    $c['sub'] = trim($customer . ' · ' . $district, ' ·') . ' · ' . $when((int) $o['opened_at']);
+                } else {
+                    $c['sub'] = t('cash.sub_pickup', ['who' => $customer, 'time' => digits((string) ($o['delivery']['pickup_at'] ?? $when((int) $o['opened_at'])))]);
+                }
                 $c['sub_m'] = $c['sub'];
                 if ($stage === 'pending') {
                     $c += ['badge' => [t('cash.b_pending'), 'attention'], 'border' => 'attention'];
-                    $pay = ['label' => t('cash.btn_approve'), 'style' => 'primary', 'post' => '/delivery/' . $o['id'] . '/move/approve'];
+                    $pay = ['label' => t('cash.btn_approve'), 'style' => 'primary', 'sheet' => '/delivery/' . $o['id'] . '/sheet'];
                 } else {
                     $c['badge'] = $stage === 'ready' ? [t('cash.b_ready'), 'success'] : [t('cash.b_kitchen'), 'info'];
                 }

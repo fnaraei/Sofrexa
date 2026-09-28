@@ -65,11 +65,13 @@ final class QrOrders
     // ------------------------------------------------------------ menu
 
     /**
-     * Categories with the items shown on the QR menu, ready for the guest page (names in the guest's language).
+     * Categories with the items shown on the QR menu (or, with $flag show_online, on online ordering), ready for the
+     * guest page with names in the guest's language.
      * @return array<int, array{id: string, name: string, items: array}>
      */
-    public static function menu(): array
+    public static function menu(string $flag = 'show_qr'): array
     {
+        $flag = $flag === 'show_online' ? 'show_online' : 'show_qr';
         $groups = [];
         foreach (Menu::groups() as $g) {
             $groups[$g['id']] = $g;
@@ -81,11 +83,11 @@ final class QrOrders
             }
         }
         $cats = [];
-        foreach (Db::rows('SELECT * FROM categories WHERE deleted = 0 AND active = 1 ORDER BY sort, id') as $c) {
+        foreach (Db::rows('SELECT * FROM categories WHERE deleted = 0 AND active = 1' . ($flag === 'show_online' ? ' AND show_online = 1' : '') . ' ORDER BY sort, id') as $c) {
             $cats[$c['id']] = ['id' => $c['id'], 'name' => tn($c['names']), 'items' => []];
         }
         foreach (Menu::items() as $i) {
-            if (!$i['show_qr'] || !$i['active'] || !isset($cats[$i['category_id']])) {
+            if (!$i[$flag] || !$i['active'] || !isset($cats[$i['category_id']])) {
                 continue;
             }
             $opts = [];

@@ -217,6 +217,15 @@
       input.dispatchEvent(new Event('change', { bubbles: true }));
       return;
     }
+    // ready-time chips of an online order to accept: the chosen minutes go with "Onayla"
+    const eta = e.target.closest('[data-eta-chips] [data-eta]');
+    if (eta) {
+      const box = eta.closest('[data-eta-chips]');
+      box.querySelectorAll('.chip').forEach(c => c.classList.toggle('is-selected', c === eta));
+      const ok = box.closest('.sheet').querySelector('[data-post$="/move/approve"]');
+      if (ok) ok.dataset.body = JSON.stringify({ eta: parseInt(eta.dataset.eta, 10) });
+      return;
+    }
     const chip = e.target.closest('[data-fill] .chip');
     if (chip) {
       const wrap = chip.closest('[data-fill]');

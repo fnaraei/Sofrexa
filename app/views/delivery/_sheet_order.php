@@ -6,7 +6,8 @@ use Sofrexa\View\{OrderUi, Ui};
 $d = $o['delivery'];
 $base = '/delivery/' . $o['id'];
 $stage = $o['stage'];
-$isDelivery = $o['channel'] === 'delivery';
+$isDelivery = \Sofrexa\Modules\Orders\Delivery::isDelivery($o);
+$online = $o['channel'] === 'online';
 ?>
 <div class="scrim" data-dyn hidden>
   <div class="sheet" role="dialog" aria-modal="true">
@@ -21,9 +22,20 @@ $isDelivery = $o['channel'] === 'delivery';
       <div class="row between t-heading-m"><span><?= e(t('pay.total')) ?></span><span class="num"><?= e(money((int) $o['total'] - (int) $o['paid'])) ?></span></div>
 
       <?php if ($stage === 'pending'): ?>
+        <?php if ($online):
+            $mid = \Sofrexa\Modules\Online\OnlineOrders::etaMid();
+            $opts = array_values(array_unique([20, 30, $mid, 45, 60]));
+            sort($opts); ?>
+          <div class="overline"><?= e(t($isDelivery ? 'on.till_eta_delivery' : 'on.till_eta_pickup')) ?></div>
+          <div class="chips chips--wrap" data-eta-chips>
+            <?php foreach ($opts as $m): ?><?= Ui::chip(t('on.till_min', ['n' => digits($m)]), $m === $mid, null, ['data-eta' => $m]) ?><?php endforeach ?>
+          </div>
+          <?php if (!empty($d['when']) && $d['when'] !== 'asap'): ?><div class="t-body-s c-muted"><?= e(t('on.till_wants', ['t' => digits($d['when'])])) ?></div><?php endif ?>
+          <div class="t-body-s c-muted"><?= e(t('on.pay_' . (($d['pay_hint'] ?? 'cash') === 'card' ? 'card' : 'cash') . ($isDelivery ? '' : '_shop')) . (!empty($d['cash_given']) ? ' · ' . t('on.cash_with', ['amount' => money((int) $d['cash_given'])]) : '')) ?></div>
+        <?php endif ?>
         <div class="sheet__actions">
           <?= Ui::btn(t('deliv.a_reject'), ['style' => 'danger', 'size' => 'l', 'icon' => 'close', 'attrs' => ['data-post' => $base . '/move/reject', 'data-confirm' => t('js.confirm')]]) ?>
-          <?= Ui::btn(t('deliv.a_approve'), ['size' => 'l', 'icon' => 'check', 'attrs' => ['data-post' => $base . '/move/approve']]) ?>
+          <?= Ui::btn(t('deliv.a_approve'), ['size' => 'l', 'icon' => 'check', 'attrs' => ['data-post' => $base . '/move/approve', 'data-body' => $online ? json_encode(['eta' => $mid ?? 0]) : null]]) ?>
         </div>
       <?php else: ?>
         <?php if ($isDelivery && in_array($stage, ['kitchen', 'ready'], true)): ?>

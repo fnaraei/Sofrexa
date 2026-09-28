@@ -39,6 +39,14 @@ final class Server
         $n = Apply::rows((array) ($in['rows'] ?? []));
         Db::exec('DELETE FROM sync_outbox WHERE seq <= ?', [(int) ($in['ack'] ?? 0)]);
         Status::markOk();
+        // the till moved online orders along: tell the customers by e-mail
+        if ($n > 0) {
+            try {
+                \Sofrexa\Modules\Online\OnlineOrders::notices();
+            } catch (\Throwable $e) {
+                App::log('mail', 'online notices: ' . $e->getMessage());
+            }
+        }
         Response::json(['ok' => true, 'epoch' => $epoch, 'applied' => $n]);
     }
 

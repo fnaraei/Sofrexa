@@ -90,6 +90,11 @@ final class Kitchen
                 return [mb_strtoupper(t('order.delivery', ['no' => sprintf('%04d', (int) $r['no'])]), 'UTF-8'), $district,
                     [$waiter, $courier !== '' ? t('cash.courier', ['name' => $courier]) : ''], t('kds.ch_phone')];
             default:
+                if (($d['type'] ?? '') === 'delivery') {
+                    // online delivery: the district, as for a phone order
+                    return [mb_strtoupper(t('order.online', ['no' => sprintf('%04d', (int) $r['no'])]), 'UTF-8'), trim(explode(',', (string) ($d['address'] ?? ''))[0]),
+                        [\Sofrexa\Modules\Orders\Till::shortName($r['customer_name'] ?? $r['label'] ?? ''), !empty($d['pickup_at']) ? $d['pickup_at'] : ''], t('cash.f_online')];
+                }
                 return [mb_strtoupper(t('order.online', ['no' => sprintf('%04d', (int) $r['no'])]), 'UTF-8'), t('deliv.t_pickup') . (!empty($d['pickup_at']) ? ' ' . $d['pickup_at'] : ''),
                     [\Sofrexa\Modules\Orders\Till::shortName($r['customer_name'] ?? $r['label'] ?? '')], t('cash.f_online')];
         }

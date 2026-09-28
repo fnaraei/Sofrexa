@@ -36,10 +36,16 @@ final class DeliveryController
     public function move(Request $req): void
     {
         $stage = $req->param('stage');
+        $o = Orders::get($req->param('id'));
+        $online = $o['channel'] === 'online' && $o['status'] === 'pending';
         if ($stage === 'reject') {
-            Orders::void($req->param('id'), $req->str('reason') ?: 'reddedildi');
+            // an online order not yet accepted is turned down, not voided: nothing reached the kitchen
+            $online ? \Sofrexa\Modules\Online\OnlineOrders::reject($o['id'], $req->str('reason')) : Orders::void($o['id'], $req->str('reason') ?: 'reddedildi');
+        } elseif ($stage === 'approve' && $online) {
+            \Sofrexa\Modules\Online\OnlineOrders::approve($o['id'], $req->int('eta'));
         } else {
-            Delivery::move($req->param('id'), $stage);
+            Delivery::move($o['id'], $stage);
+            \Sofrexa\Modules\Online\OnlineOrders::notices();
         }
         Response::json(['ok' => true, 'message' => I18n::t($stage === 'done' ? 'deliv.delivered' : 'deliv.moved'), 'reload' => true]);
     }
