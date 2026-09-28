@@ -39,8 +39,9 @@ final class Finance
      */
     public static function entries(int $from, int $to): array
     {
-        $fromDay = date('Y-m-d', intdiv($from, 1000));
-        $toDay = date('Y-m-d', intdiv($to - 1, 1000));
+        // dated documents by business day: the day of the 27th runs to 05:00 on the 28th, a bill dated the 28th is not its
+        $roll = (int) Settings::get('day.rollover_hour', 5);
+        [$fromDay, $toDay] = Clock::days($from, $to, $roll);
         $rows = [];
         // by hand and recurring (reversed ones and their reversals left out)
         foreach (Db::rows("SELECT f.* FROM finance_entries f WHERE f.day >= ? AND f.day <= ? AND f.reverses IS NULL
@@ -56,8 +57,9 @@ final class Finance
                 'method' => $d['pay_method'] === 'cash' ? 'cash' : ($d['pay_method'] === 'card' ? 'card' : 'bank'), 'source' => 'stock', 'amount' => (int) $d['total'], 'receipt' => null, 'own' => false, 'fx' => null];
         }
         // salaries and advances, one line per day and method (imported ItKafe accruals are not money that moved)
-        foreach (Db::rows("SELECT p.at, p.period, p.kind, p.method, p.total, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? AND p.kind <> 'accrual' ORDER BY p.at", [$from, $to]) as $p) {
-            $day = date('Y-m-d', intdiv((int) $p['at'], 1000));
+        // (a meal charged to a staff member is not money paid either)
+        foreach (Db::rows("SELECT p.at, p.period, p.kind, p.method, p.total, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? AND p.kind NOT IN ('accrual', 'charge') ORDER BY p.at", [$from, $to]) as $p) {
+            $day = Clock::day((int) $p['at'], $roll);
             $k = 'pay:' . $day . ':' . $p['method'] . ':' . $p['kind'];
             if (!isset($rows[$k])) {
                 $rows[$k] = ['id' => $k, 'at' => (int) $p['at'], 'day' => $day, 'kind' => 'expense', 'category' => 'staff', 'text' => '', 'names' => [],
@@ -80,7 +82,7 @@ final class Finance
             if ($cat === null) {
                 continue;
             }
-            $rows[] = ['id' => $m['id'], 'at' => (int) $m['at'], 'day' => date('Y-m-d', intdiv((int) $m['at'], 1000)), 'kind' => 'expense', 'category' => $cat,
+            $rows[] = ['id' => $m['id'], 'at' => (int) $m['at'], 'day' => Clock::day((int) $m['at'], $roll), 'kind' => 'expense', 'category' => $cat,
                 'text' => trim($m['reason'] . ($m['note'] ? ' · ' . $m['note'] : '')), 'method' => 'cash', 'source' => 'till', 'amount' => -(int) $m['amount'],
                 'receipt' => $m['photo'], 'own' => false, 'fx' => null];
         }

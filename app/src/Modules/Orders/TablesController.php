@@ -103,10 +103,7 @@ final class TablesController
     public function move(Request $req): void
     {
         $id = $req->param('id');
-        Orders::moveTable($id, $req->str('table_id'));
-        foreach (Db::rows('SELECT id FROM orders WHERE parent_id = ? AND status IN (\'open\', \'billed\', \'pending\') AND deleted = 0', [$id]) as $part) {
-            Orders::moveTable($part['id'], $req->str('table_id'));
-        }
+        Orders::moveTable($id, $req->str('table_id')); // the split bills of the table go with it
         $n = (string) Db::value('SELECT number FROM tables WHERE id = ?', [$req->str('table_id')]);
         Response::json(['ok' => true, 'message' => I18n::t('move.done', ['n' => $n]), 'redirect' => '/tables?t=' . $req->str('table_id')]);
     }

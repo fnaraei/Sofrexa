@@ -21,14 +21,15 @@ $router->post('/orders/lines/{id}/void', [O::class, 'voidLine'], $p);
 $router->get('/orders/{id}', [O::class, 'show'], $p);
 $router->get('/orders/{id}/summary', [O::class, 'summary'], $p);
 $router->post('/orders/{id}/send', [O::class, 'send'], $p);
-$router->post('/orders/{id}/prebill', [O::class, 'preBill'], $p);
+// the switches a manager can take away from one person (Staff::SWITCHES) are checked on their own routes
+$router->post('/orders/{id}/prebill', [O::class, 'preBill'], ['perm' => 'bill.print']);
 
 $router->get('/orders/{id}/sheet/{kind}', [T::class, 'sheet'], $p);
-$router->post('/orders/{id}/move', [T::class, 'move'], $p);
-$router->post('/orders/{id}/merge', [T::class, 'merge'], $p);
+$router->post('/orders/{id}/move', [T::class, 'move'], ['perm' => 'orders.transfer']);
+$router->post('/orders/{id}/merge', [T::class, 'merge'], ['perm' => 'orders.transfer']);
 $router->post('/orders/{id}/split', [T::class, 'split'], $p);
 $router->post('/orders/{id}/guests', [T::class, 'guests'], $p);
-$router->post('/orders/{id}/waiter', [T::class, 'waiter'], $p);
+$router->post('/orders/{id}/waiter', [T::class, 'waiter'], ['perm' => 'orders.transfer']);
 $router->post('/orders/{id}/bill', [T::class, 'requestBill'], $p);
 $router->post('/orders/{id}/close', [T::class, 'close'], $p);
 

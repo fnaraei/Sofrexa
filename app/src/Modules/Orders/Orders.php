@@ -129,8 +129,9 @@ final class Orders
             throw new \InvalidArgumentException(I18n::t('order.err_soldout', ['name' => tn($item['names'])]));
         }
         $qty = max(0.5, min(99, $qty));
-        if ($item['left'] !== null && $qty > $item['left']) {
-            throw new \InvalidArgumentException(I18n::t('order.err_stock', ['name' => tn($item['names']), 'n' => $item['left']]));
+        // the daily stock counts what was sent and what is waiting unsent in any bill (it is sent later)
+        if ($item['left'] !== null && $qty > ($left = max(0, $item['left'] - Menu::reserved($itemId)))) {
+            throw new \InvalidArgumentException(I18n::t('order.err_stock', ['name' => tn($item['names']), 'n' => I18n::numAuto($left)]));
         }
         [$modRows, $modsPrice] = self::mods($itemId, $mods);
         $note = mb_substr(trim($note), 0, 200);
@@ -169,15 +170,26 @@ final class Orders
         return $id;
     }
 
-    /** Chosen options as [{id, name, price}] and their total price. */
-    private static function mods(string $itemId, array $mods): array
+    /**
+     * Chosen options as [{id, name, price}] and their total price. The same rules for the waiter, the till, QR and online:
+     * every option must belong to the dish, and each of its option groups needs between min_sel and max_sel choices.
+     */
+    public static function mods(string $itemId, array $mods): array
     {
         $mods = array_values(array_unique(array_filter(array_map('strval', $mods))));
-        if (!$mods) {
-            return [[], 0];
+        $rows = $mods ? Db::rows('SELECT m.id, m.names, m.price, m.group_id FROM modifiers m JOIN item_modifier_groups g ON g.group_id = m.group_id AND g.item_id = ? AND g.deleted = 0
+            WHERE m.id IN (' . Db::in($mods) . ') AND m.deleted = 0', [$itemId, ...$mods]) : [];
+        if (count($rows) !== count($mods)) {
+            throw new ValidationError(['mods' => I18n::t('order.err_option')]);
         }
-        $rows = Db::rows('SELECT m.id, m.names, m.price, m.group_id FROM modifiers m JOIN item_modifier_groups g ON g.group_id = m.group_id AND g.item_id = ? AND g.deleted = 0
-            WHERE m.id IN (' . Db::in($mods) . ') AND m.deleted = 0', [$itemId, ...$mods]);
+        $per = array_count_values(array_column($rows, 'group_id'));
+        foreach (Db::rows('SELECT g.id, g.names, g.min_sel, g.max_sel FROM item_modifier_groups l JOIN modifier_groups g ON g.id = l.group_id AND g.deleted = 0
+            WHERE l.item_id = ? AND l.deleted = 0', [$itemId]) as $g) {
+            $n = $per[$g['id']] ?? 0;
+            if ($n < (int) $g['min_sel'] || ((int) $g['max_sel'] > 0 && $n > (int) $g['max_sel'])) {
+                throw new ValidationError(['mods' => I18n::t('order.err_required', ['name' => tn($g['names'])])]);
+            }
+        }
         $out = [];
         $sum = 0;
         foreach ($rows as $m) {
@@ -224,26 +236,67 @@ final class Orders
         if (!$new) {
             return 0;
         }
-        $round = (int) Db::value("SELECT COALESCE(MAX(round), 0) + 1 FROM order_items WHERE order_id = ? AND status NOT IN ('new') AND deleted = 0", [$orderId]);
         $now = Clock::ms();
-        Db::tx(static function () use ($new, $round, $now, $o): void {
+        // one step: the lines, their tickets and the stock they take go together or not at all
+        return Db::tx(static function () use ($new, $now, $o, $orderId): int {
+            $ids = array_column($new, 'id');
+            // read again inside the lock: a second tap (or a second device) must not send the same lines twice
+            $new = Db::rows("SELECT * FROM order_items WHERE id IN (" . Db::in($ids) . ") AND status = 'new' AND deleted = 0", $ids);
+            if (!$new) {
+                return 0;
+            }
+            self::checkDaily($new);
+            $round = (int) Db::value("SELECT COALESCE(MAX(round), 0) + 1 FROM order_items WHERE order_id = ? AND status NOT IN ('new') AND deleted = 0", [$orderId]);
             foreach ($new as $l) {
-                Db::save('order_items', ['id' => $l['id'], 'status' => 'sent', 'sent_at' => $now, 'round' => $round]);
+                Db::save('order_items', ['id' => $l['id'], 'status' => 'sent', 'sent_at' => $now, 'round' => $round, 'sent_qty' => (float) $l['qty']]);
             }
             if ($o['status'] === 'billed') {
                 Db::save('orders', ['id' => $o['id'], 'status' => 'open']);
             }
+            Tickets::kitchen($orderId, array_column($new, 'id'), $round);
+            \Sofrexa\Modules\Stock\Stock::consume(array_column($new, 'id'));
+            return count($new);
         });
-        Tickets::kitchen($orderId, array_column($new, 'id'), $round);
-        \Sofrexa\Modules\Stock\Stock::consume(array_column($new, 'id'));
-        return count($new);
     }
 
-    /** Void a line. Sent lines need a reason and orders.void; the station gets a cancel ticket. */
+    /** Lines about to go to the kitchen must fit in today's daily stock (the last check: bills may have reserved the same portions). */
+    private static function checkDaily(array $lines): void
+    {
+        $want = [];
+        foreach ($lines as $l) {
+            if ($l['item_id']) {
+                $want[$l['item_id']] = ($want[$l['item_id']] ?? 0) + (float) $l['qty'];
+            }
+        }
+        if (!$want) {
+            return;
+        }
+        $ids = array_keys($want);
+        $capped = Db::rows('SELECT id, names, daily_stock FROM items WHERE daily_stock IS NOT NULL AND id IN (' . Db::in($ids) . ')', $ids);
+        if (!$capped) {
+            return;
+        }
+        $sold = Menu::soldToday();
+        foreach ($capped as $i) {
+            $left = max(0, (int) $i['daily_stock'] - (int) floor($sold[$i['id']] ?? 0));
+            if ($want[$i['id']] > $left) {
+                throw new \InvalidArgumentException(I18n::t('order.err_stock', ['name' => tn($i['names']), 'n' => I18n::numAuto($left)]));
+            }
+        }
+    }
+
+    /**
+     * Void a line. Sent lines need a reason and orders.void; the station gets a cancel ticket. What happens to the dish
+     * depends on how far the kitchen got: marked ready (or served) → it is cooked, booked as waste at once; only sent →
+     * the till asks the kitchen and decides (back to stock or waste, see settleVoid). A line voided once cannot be voided again.
+     */
     public static function voidLine(string $lineId, string $reason, float $qty = 0): void
     {
         $l = self::line($lineId);
         $o = self::editable($l['order_id']);
+        if ($l['status'] === 'void') {
+            throw new \InvalidArgumentException(I18n::t('order.err_voided'));
+        }
         if ($l['status'] === 'new') {
             self::updateLine($lineId, 0);
             return;
@@ -255,24 +308,137 @@ final class Orders
         if ($reason === '') {
             throw new ValidationError(['reason' => I18n::t('order.err_reason')]);
         }
-        $qty = $qty > 0 && $qty < (float) $l['qty'] ? $qty : (float) $l['qty'];
         $u = Auth::user();
-        Db::tx(static function () use ($l, $qty, $reason, $u): void {
+        [$voidId, $qty, $stock] = Db::tx(static function () use ($lineId, $qty, $reason, $u): array {
+            // read again inside the lock: two taps at once must not both void (and give the stock back twice)
+            $l = Db::row('SELECT * FROM order_items WHERE id = ? AND deleted = 0', [$lineId]);
+            if (!$l || $l['status'] === 'void' || $l['status'] === 'new') {
+                throw new \InvalidArgumentException(I18n::t('order.err_voided'));
+            }
+            $qty = $qty > 0 && $qty < (float) $l['qty'] ? $qty : (float) $l['qty'];
+            // a drink sent to the bar with no recipe behind it has nothing to ask the kitchen about
+            $cooks = $l['station'] === 'kitchen' || Db::value("SELECT 1 FROM stock_moves WHERE order_item_id = ? AND reason = 'sale' LIMIT 1", [$l['id']]);
+            $stock = in_array($l['status'], ['ready', 'served'], true) ? 'waste' : ($cooks ? 'pending' : null);
+            $mark = ['status' => 'void', 'void_reason' => $reason, 'void_by' => $u['id'] ?? null, 'void_at' => Clock::ms(), 'void_stock' => $stock];
             if ($qty < (float) $l['qty']) {
                 // partial void: the rest stays as it is, the voided part becomes its own line
                 Db::save('order_items', ['id' => $l['id'], 'qty' => (float) $l['qty'] - $qty]);
                 $void = $l;
-                unset($void['id'], $void['by_name']);
-                Db::save('order_items', ['qty' => $qty, 'status' => 'void', 'void_reason' => $reason, 'void_by' => $u['id'] ?? null, 'void_at' => Clock::ms(), 'mods' => json_arr($l['mods'])] + $void);
+                unset($void['id']);
+                $id = Db::save('order_items', ['qty' => $qty, 'mods' => json_arr($l['mods']), 'void_of' => $l['id']] + $mark + $void);
             } else {
-                Db::save('order_items', ['id' => $l['id'], 'status' => 'void', 'void_reason' => $reason, 'void_by' => $u['id'] ?? null, 'void_at' => Clock::ms()]);
+                $id = Db::save('order_items', ['id' => $l['id']] + $mark);
             }
+            if ($stock === 'waste') {
+                \Sofrexa\Modules\Stock\Stock::settleVoid($id, 'waste');
+            }
+            return [$id, $qty, $stock];
         });
         self::recalc($o['id']);
         $amount = (int) round($qty * ((int) $l['unit_price'] + (int) $l['mods_price']));
-        Audit::log('order.void_item', self::where($o) . ' · ' . $l['name'] . ' ×' . self::qtyText($qty) . ' · ' . Money::fmt($amount, false, 'tr') . ' · sebep: ' . $reason, 'order', $o['id'], ['line' => $l['id']]);
+        Audit::log('order.void_item', self::where($o) . ' · ' . $l['name'] . ' ×' . self::qtyText($qty) . ' · ' . Money::fmt($amount, false, 'tr') . ' · sebep: ' . $reason
+            . ($stock === 'waste' ? ' · hazırdı: zayi' : ''), 'order', $o['id'], ['line' => $l['id']]);
         Tickets::void($o['id'], $l['id'], $qty, $reason);
-        \Sofrexa\Modules\Stock\Stock::giveBack($l['id'], $qty);
+        if ($stock === 'pending') {
+            self::askKitchen($o, $voidId);
+        }
+    }
+
+    /** "Masa 2 · 1× Margarita iptal — mutfağa sorun": the till decides whether the cancelled dish was already cooked. */
+    private static function askKitchen(array $o, string $voidId): void
+    {
+        $v = Db::row('SELECT name, qty, void_by FROM order_items WHERE id = ?', [$voidId]);
+        Notify::pushLine('void', ['where' => self::where($o), 'what' => self::qtyText((float) $v['qty']) . '× ' . $v['name'],
+            'by' => (string) Db::value('SELECT name FROM users WHERE id = ?', [$v['void_by']])], 'cashier', $voidId);
+    }
+
+    /**
+     * The till's answer for a cancelled dish that was only sent: 'returned' — not cooked, the ingredients go back to stock;
+     * 'waste' — it was cooked, the ingredients are booked as waste (it can still go to another bill or a staff member).
+     */
+    public static function settleVoid(string $voidId, string $how): void
+    {
+        if (!Auth::can('cash.pay') && !Auth::can('orders.void')) {
+            throw new HttpError(403, I18n::t('err.forbidden'));
+        }
+        $how = $how === 'returned' ? 'returned' : 'waste';
+        $v = Db::tx(static function () use ($voidId, $how): array {
+            $v = Db::row("SELECT * FROM order_items WHERE id = ? AND status = 'void' AND deleted = 0", [$voidId]) ?? throw new HttpError(404);
+            if ($v['void_stock'] !== 'pending') {
+                throw new \InvalidArgumentException(I18n::t('void.err_done'));
+            }
+            Db::save('order_items', ['id' => $voidId, 'void_stock' => $how, 'reuse_at' => Clock::ms(), 'reuse_by' => Auth::user()['id'] ?? null]);
+            \Sofrexa\Modules\Stock\Stock::settleVoid($voidId, $how === 'returned' ? 'return' : 'waste');
+            return $v;
+        });
+        Notify::closeLine($voidId);
+        $o = Db::row('SELECT o.*, t.number AS table_no FROM orders o LEFT JOIN tables t ON t.id = o.table_id WHERE o.id = ?', [$v['order_id']]);
+        Audit::log('order.void_stock', self::where($o) . ' · ' . $v['name'] . ' ×' . self::qtyText((float) $v['qty']) . ' · ' . ($how === 'returned' ? 'stoka döndü' : 'zayi'), 'order', $v['order_id'], ['line' => $voidId]);
+    }
+
+    /**
+     * A cooked dish that was cancelled goes to another open bill after all (the same dish was ordered there): a ready line
+     * on that bill at the price the dish was made for, no new kitchen ticket, and its ingredients count as that sale.
+     */
+    public static function reuseVoided(string $voidId, string $orderId): string
+    {
+        if (!Auth::can('cash.pay') && !Auth::can('orders.void')) {
+            throw new HttpError(403, I18n::t('err.forbidden'));
+        }
+        $target = self::editable($orderId);
+        $lineId = Db::tx(static function () use ($voidId, $target): string {
+            $v = self::voidedDish($voidId);
+            $now = Clock::ms();
+            $id = Db::save('order_items', ['order_id' => $target['id'], 'item_id' => $v['item_id'], 'name' => $v['name'], 'qty' => (float) $v['qty'],
+                'unit_price' => (int) $v['unit_price'], 'promo_id' => $v['promo_id'], 'list_price' => $v['list_price'], 'mods' => json_arr($v['mods']), 'mods_price' => (int) $v['mods_price'],
+                'note' => $v['note'], 'station' => $v['station'], 'status' => 'ready', 'vat_rate' => (float) $v['vat_rate'], 'cost' => (int) $v['cost'],
+                'round' => (int) Db::value("SELECT COALESCE(MAX(round), 0) + 1 FROM order_items WHERE order_id = ? AND status <> 'new'", [$target['id']]),
+                'sent_at' => $now, 'ready_at' => $now, 'sent_qty' => (float) $v['qty'], 'created_by' => Auth::user()['id'] ?? null, 'created_at' => $now]);
+            Db::save('order_items', ['id' => $voidId, 'void_stock' => 'table', 'reuse_ref' => $id, 'reuse_at' => $now, 'reuse_by' => Auth::user()['id'] ?? null]);
+            \Sofrexa\Modules\Stock\Stock::reuseWaste($voidId, $id);
+            return $id;
+        });
+        self::recalc($target['id']);
+        Notify::closeLine($voidId);
+        $v = self::line($voidId);
+        Audit::log('order.void_reuse', $v['name'] . ' ×' . self::qtyText((float) $v['qty']) . ' → ' . self::where($target), 'order', $target['id'], ['line' => $lineId, 'from' => $voidId]);
+        return $lineId;
+    }
+
+    /** A cooked dish that was cancelled is taken by a staff member: its price is charged to them (deducted from their pay). */
+    public static function chargeVoidedToStaff(string $voidId, string $userId): string
+    {
+        if (!Auth::can('cash.pay') && !Auth::can('orders.void')) {
+            throw new HttpError(403, I18n::t('err.forbidden'));
+        }
+        $name = Db::value('SELECT name FROM users WHERE id = ? AND deleted = 0', [$userId]) ?? throw new HttpError(404);
+        [$pid, $v, $amount] = Db::tx(static function () use ($voidId, $userId, $name): array {
+            $v = self::voidedDish($voidId);
+            $amount = (int) round((float) $v['qty'] * ((int) $v['unit_price'] + (int) $v['mods_price']));
+            $now = Clock::ms();
+            $pid = Db::append('payroll', ['user_id' => $userId, 'period' => date('Y-m', intdiv($now, 1000)), 'kind' => 'charge', 'total' => $amount, 'method' => 'deduction',
+                'note' => mb_substr(self::qtyText((float) $v['qty']) . '× ' . $v['name'] . ' (iptal)', 0, 200), 'at' => $now, 'user_by' => Auth::user()['id'] ?? null]);
+            Db::save('order_items', ['id' => $voidId, 'void_stock' => 'staff', 'reuse_ref' => $userId, 'reuse_at' => $now, 'reuse_by' => Auth::user()['id'] ?? null]);
+            return [$pid, $v, $amount];
+        });
+        Notify::closeLine($voidId);
+        Audit::log('order.void_staff', $v['name'] . ' ×' . self::qtyText((float) $v['qty']) . ' → ' . $name . ' · ' . Money::fmt($amount, false, 'tr'), 'user', $userId, ['line' => $voidId, 'payroll' => $pid]);
+        return $pid;
+    }
+
+    /** A cancelled dish that is (or may be) cooked and not given anywhere yet; a pending one is booked as waste first. */
+    private static function voidedDish(string $voidId): array
+    {
+        $v = Db::row("SELECT * FROM order_items WHERE id = ? AND status = 'void' AND deleted = 0", [$voidId]) ?? throw new HttpError(404);
+        if ($v['void_stock'] === 'pending') {
+            Db::save('order_items', ['id' => $voidId, 'void_stock' => 'waste']);
+            \Sofrexa\Modules\Stock\Stock::settleVoid($voidId, 'waste');
+            $v['void_stock'] = 'waste';
+        }
+        if ($v['void_stock'] !== 'waste') {
+            throw new \InvalidArgumentException(I18n::t('void.err_done'));
+        }
+        return $v;
     }
 
     public static function discount(string $orderId, string $kind, float $value, string $reason = ''): void
@@ -296,28 +462,43 @@ final class Orders
     public static function clearDiscount(string $orderId): void
     {
         $o = self::editable($orderId);
-        if ((int) $o['discount'] <= 0) {
+        if (!\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId)) {
             return;
         }
-        Db::append('order_discounts', ['order_id' => $orderId, 'kind' => 'reverse', 'value' => 0, 'amount' => -(int) $o['discount'], 'reason' => 'iptal', 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
-        self::recalc($orderId);
+        // every entry in force is cancelled, not only the part the bill could use (a ₺150 discount on a ₺100 bill)
+        Db::tx(static function () use ($orderId): void {
+            self::replaceDiscounts($orderId, [], 'iptal');
+            \Sofrexa\Modules\Customers\Loyalty::refund($orderId);
+            self::recalc($orderId);
+        });
         Audit::log('order.discount', self::where($o) . ' · indirim kaldırıldı', 'order', $orderId);
     }
 
     // ------------------------------------------------------------ tables
 
+    /**
+     * Moves a table's bill to another (free) table — together with the bills split off it and the one it was split from,
+     * in one step, so a family of bills never ends up on two tables.
+     */
     public static function moveTable(string $orderId, string $tableId): void
     {
         $o = self::editable($orderId);
-        if (Db::value("SELECT 1 FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 AND id <> ?", [$tableId, $orderId])) {
-            throw new \InvalidArgumentException(I18n::t('order.err_table_busy'));
-        }
         $to = Db::value('SELECT number FROM tables WHERE id = ? AND deleted = 0', [$tableId]);
         if ($to === null) {
             throw new HttpError(404);
         }
-        Db::save('orders', ['id' => $orderId, 'table_id' => $tableId]);
-        Audit::log('order.transfer', self::where($o) . ' → Masa ' . $to, 'order', $orderId);
+        $root = $o['parent_id'] ?: $o['id'];
+        $family = array_column(Db::rows("SELECT id FROM orders WHERE (id = ? OR parent_id = ?) AND status IN ('pending', 'open', 'billed') AND deleted = 0", [$root, $root]), 'id');
+        $family = array_values(array_unique([...$family, $orderId]));
+        Db::tx(static function () use ($family, $tableId): void {
+            if (Db::value("SELECT 1 FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 AND id NOT IN (" . Db::in($family) . ')', [$tableId, ...$family])) {
+                throw new \InvalidArgumentException(I18n::t('order.err_table_busy'));
+            }
+            foreach ($family as $id) {
+                Db::save('orders', ['id' => $id, 'table_id' => $tableId]);
+            }
+        });
+        Audit::log('order.transfer', self::where($o) . ' → Masa ' . $to . (count($family) > 1 ? ' · ' . count($family) . ' hesap' : ''), 'order', $orderId);
     }
 
     /** Moves every line (and payments) of $fromId into $intoId and closes $fromId. */
@@ -328,14 +509,20 @@ final class Orders
         if ((int) $from['paid'] > 0) {
             throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
         }
-        Db::tx(static function () use ($fromId, $intoId): void {
+        Db::tx(static function () use ($fromId, $intoId, $from): void {
+            // the discounts in force travel as the amounts they gave on their own bill (10% of that bill, not of both)
+            foreach (\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($fromId) as $d) {
+                $amount = $d['kind'] === 'pct' ? (int) round((int) $from['subtotal'] * (float) $d['value'] / 100) : (int) $d['amount'];
+                if ($amount > 0) {
+                    Db::append('order_discounts', ['order_id' => $intoId, 'kind' => 'amount', 'value' => $amount, 'amount' => $amount,
+                        'reason' => $d['reason'] === 'puan' ? 'puan' : 'birleştirme: ' . ($d['reason'] ?? ''), 'user_id' => $d['user_id'], 'at' => Clock::ms()]);
+                }
+            }
             foreach (Db::rows('SELECT id FROM order_items WHERE order_id = ? AND deleted = 0', [$fromId]) as $l) {
                 Db::save('order_items', ['id' => $l['id'], 'order_id' => $intoId]);
             }
-            foreach (Db::rows('SELECT * FROM order_discounts WHERE order_id = ?', [$fromId]) as $d) {
-                Db::append('order_discounts', ['order_id' => $intoId, 'kind' => $d['kind'], 'value' => $d['value'], 'amount' => $d['amount'], 'reason' => 'birleştirme: ' . ($d['reason'] ?? ''), 'user_id' => $d['user_id'], 'at' => Clock::ms()]);
-            }
             Db::save('orders', ['id' => $fromId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => 'merged:' . $intoId]);
+            self::recalc($fromId);
         });
         self::recalc($intoId);
         Audit::log('order.merge', self::where($from) . ' → ' . self::where($into), 'order', $intoId);
@@ -361,13 +548,75 @@ final class Orders
         if (!$lines) {
             throw new ValidationError(['lines' => I18n::t('order.err_pick_lines')]);
         }
-        $new = self::create($o['channel'], ['table_id' => $o['table_id'], 'customer_id' => $o['customer_id'], 'waiter_id' => $o['waiter_id'], 'parent_id' => $orderId, 'label' => $o['label']]);
-        foreach ($lines as $l) {
-            Db::save('order_items', ['id' => $l['id'], 'order_id' => $new]);
-        }
-        self::recalc($orderId);
-        self::recalc($new);
+        $new = Db::tx(static function () use ($o, $orderId, $lines): string {
+            $ids = array_column($lines, 'id');
+            $sub = (int) Db::value("SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]);
+            $moved = (int) Db::value('SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE id IN (' . Db::in($ids) . ')', $ids);
+            $rest = $sub - $moved;
+            // discounts follow the dishes: a percentage stays on both bills, a fixed amount is shared by value,
+            // points stay on this bill (they were used for it)
+            $mine = [];
+            $theirs = [];
+            $points = 0;
+            foreach (\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId) as $d) {
+                if ($d['kind'] === 'pct') {
+                    $mine[] = $d;
+                    $theirs[] = $d;
+                } elseif ($d['reason'] === 'puan') {
+                    $mine[] = $d;
+                    $points += (int) $d['amount'];
+                } else {
+                    $share = $sub > 0 ? (int) round((int) $d['amount'] * $moved / $sub) : 0;
+                    $mine[] = ['amount' => (int) $d['amount'] - $share, 'value' => (int) $d['amount'] - $share] + $d;
+                    $theirs[] = ['amount' => $share, 'value' => $share] + $d;
+                }
+            }
+            // what was already paid (money or points) must still be covered by what stays on this bill
+            $restTotal = $rest - min($rest, self::discountTotal($mine, $rest));
+            if ((int) $o['paid'] > $restTotal || $points > $rest) {
+                throw new \InvalidArgumentException(I18n::t('order.err_split_paid'));
+            }
+            $new = self::create($o['channel'], ['table_id' => $o['table_id'], 'customer_id' => $o['customer_id'], 'waiter_id' => $o['waiter_id'], 'parent_id' => $orderId, 'label' => $o['label']]);
+            foreach ($ids as $id) {
+                Db::save('order_items', ['id' => $id, 'order_id' => $new]);
+            }
+            if (array_filter($theirs, static fn(array $d): bool => $d['kind'] !== 'pct')) {
+                self::replaceDiscounts($orderId, $mine, 'bölme');
+            }
+            foreach ($theirs as $d) {
+                if ($d['kind'] === 'pct' || (int) $d['amount'] > 0) {
+                    Db::append('order_discounts', ['order_id' => $new, 'kind' => $d['kind'], 'value' => $d['value'], 'amount' => $d['amount'], 'reason' => $d['reason'], 'user_id' => $d['user_id'], 'at' => Clock::ms()]);
+                }
+            }
+            self::recalc($orderId);
+            self::recalc($new);
+            return $new;
+        });
+        Audit::log('order.split', self::where($o) . ' · ' . count($lines) . ' ürün ayrı hesaba', 'order', $new);
         return $new;
+    }
+
+    /** Starts the discounts of an order again from $entries (the table is append-only: a reset entry, then the new ones). */
+    private static function replaceDiscounts(string $orderId, array $entries, string $why): void
+    {
+        $sum = (int) Db::value('SELECT COALESCE(SUM(amount), 0) FROM order_discounts WHERE order_id = ?', [$orderId]);
+        $uid = Auth::user()['id'] ?? null;
+        Db::append('order_discounts', ['order_id' => $orderId, 'kind' => 'reverse', 'value' => 0, 'amount' => -$sum, 'reason' => $why, 'user_id' => $uid, 'at' => Clock::ms()]);
+        foreach ($entries as $d) {
+            if ($d['kind'] === 'pct' || (int) $d['amount'] > 0) {
+                Db::append('order_discounts', ['order_id' => $orderId, 'kind' => $d['kind'], 'value' => $d['value'], 'amount' => $d['amount'], 'reason' => $d['reason'], 'user_id' => $d['user_id'] ?? $uid, 'at' => Clock::ms()]);
+            }
+        }
+    }
+
+    /** The discount of active entries on a subtotal: a percentage is always of the bill as it is now (kuruş). */
+    public static function discountTotal(array $entries, int $sub): int
+    {
+        $sum = 0;
+        foreach ($entries as $d) {
+            $sum += $d['kind'] === 'pct' ? (int) round($sub * (float) $d['value'] / 100) : (int) $d['amount'];
+        }
+        return max(0, min($sum, $sub));
     }
 
     // ------------------------------------------------------------ bill and payment
@@ -389,19 +638,42 @@ final class Orders
     public static function pay(string $orderId, array $parts, ?string $customerId = null, bool $receipt = true, ?int $limit = null): array
     {
         $o = self::editable($orderId);
-        if ((int) $o['total'] <= 0 && !$o['lines']) {
+        if (!array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'void')) {
             throw new \InvalidArgumentException(I18n::t('order.err_empty'));
         }
         if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId])) {
             self::send($orderId);
-            $o = self::get($orderId);
         }
+        $shift = Shifts::currentId();
+        $rates = Rates::latest();
+        $u = Auth::user();
+        // one step, read inside the lock: two tills taking the last payment of a bill at once cannot both take it
+        return Db::tx(static function () use ($orderId, $parts, $customerId, $receipt, $limit, $shift, $rates, $u): array {
+            $o = self::get($orderId);
+            if (!in_array($o['status'], self::OPEN, true)) {
+                throw new \InvalidArgumentException(I18n::t('order.err_closed'));
+            }
+            if ((int) $o['paid'] >= (int) $o['total']) {
+                // nothing left to pay (discounted to ₺0, or covered by points): the bill closes without a made-up payment
+                self::close($orderId);
+                if ($receipt) {
+                    Tickets::receipt($orderId);
+                }
+                Audit::log('order.free', self::where($o) . ' · ' . Money::fmt((int) $o['subtotal'], false, 'tr') . ' · ₺0 ile kapatıldı', 'order', $orderId);
+                return ['change' => 0, 'paid' => true, 'due' => 0, 'free' => true];
+            }
+            return self::takePayment($o, $parts, $customerId, $receipt, $limit, $shift, $rates, $u);
+        });
+    }
+
+    /** The payment itself, inside pay()'s transaction. */
+    private static function takePayment(array $o, array $parts, ?string $customerId, bool $receipt, ?int $limit, ?string $shift, array $rates, ?array $u): array
+    {
+        $orderId = $o['id'];
         $due = max(0, (int) $o['total'] - (int) $o['paid']);
         if ($limit !== null) {
             $due = min($due, max(0, $limit));
         }
-        $shift = Shifts::currentId();
-        $rates = Rates::latest();
         $change = 0;
         $rows = [];
         $sum = 0;
@@ -452,29 +724,26 @@ final class Orders
             }
             $change = $sum - $due;
         }
-        $u = Auth::user();
-        Db::tx(static function () use ($rows, $orderId, $shift, $customerId, $u, $change, $o): void {
-            $left = $change;
-            foreach (array_reverse($rows, true) as $i => $r) {
-                // the change is taken off the last cash part
-                $give = $r['method'] === 'cash' && $left > 0 ? min($left, $r['amount']) : 0;
-                $left -= $give;
-                $rows[$i]['give'] = $give;
+        $left = $change;
+        foreach (array_reverse($rows, true) as $i => $r) {
+            // the change is taken off the last cash part
+            $give = $r['method'] === 'cash' && $left > 0 ? min($left, $r['amount']) : 0;
+            $left -= $give;
+            $rows[$i]['give'] = $give;
+        }
+        foreach ($rows as $r) {
+            Db::append('payments', [
+                'order_id' => $orderId, 'shift_id' => $shift, 'method' => $r['method'], 'currency' => $r['cur'], 'amount_fx' => $r['fx'], 'rate' => $r['rate'],
+                'amount' => $r['amount'] - ($r['give'] ?? 0), 'change_given' => $r['give'] ?? 0, 'customer_id' => $r['method'] === 'account' ? $customerId : ($customerId ?: $o['customer_id']),
+                'at' => Clock::ms(), 'user_id' => $u['id'] ?? null, 'courier_id' => $r['courier'],
+            ]);
+            if ($r['method'] === 'account') {
+                Accounts::charge($customerId, $r['amount'], $orderId);
             }
-            foreach ($rows as $r) {
-                Db::append('payments', [
-                    'order_id' => $orderId, 'shift_id' => $shift, 'method' => $r['method'], 'currency' => $r['cur'], 'amount_fx' => $r['fx'], 'rate' => $r['rate'],
-                    'amount' => $r['amount'] - ($r['give'] ?? 0), 'change_given' => $r['give'] ?? 0, 'customer_id' => $r['method'] === 'account' ? $customerId : ($customerId ?: $o['customer_id']),
-                    'at' => Clock::ms(), 'user_id' => $u['id'] ?? null, 'courier_id' => $r['courier'],
-                ]);
-                if ($r['method'] === 'account') {
-                    Accounts::charge($customerId, $r['amount'], $orderId);
-                }
-            }
-            if ($customerId && !$o['customer_id']) {
-                Db::save('orders', ['id' => $orderId, 'customer_id' => $customerId]);
-            }
-        });
+        }
+        if ($customerId && !$o['customer_id']) {
+            Db::save('orders', ['id' => $orderId, 'customer_id' => $customerId]);
+        }
         $o = self::recalc($orderId);
         $closed = (int) $o['paid'] >= (int) $o['total'];
         if ($closed) {
@@ -489,14 +758,17 @@ final class Orders
         return ['change' => $change, 'paid' => $closed, 'due' => max(0, (int) $o['total'] - (int) $o['paid'])];
     }
 
+    /**
+     * The bill is settled, in the shift that is open now (its sales belong to that shift; each payment to its own).
+     * Paying does not serve the food (decision 38): what the kitchen has not finished stays on its screen; dishes already
+     * ready at a table that pays are taken to it.
+     */
     private static function close(string $orderId): void
     {
-        Db::save('orders', ['id' => $orderId, 'status' => 'paid', 'closed_at' => Clock::ms()]);
-        // a table that pays has eaten; a takeaway paid at the counter is still being cooked
+        Db::save('orders', ['id' => $orderId, 'status' => 'paid', 'closed_at' => Clock::ms(), 'closed_shift_id' => Shifts::currentId()]);
         if (in_array(Db::value('SELECT channel FROM orders WHERE id = ?', [$orderId]), ['table', 'qr'], true)) {
-            Db::exec("UPDATE order_items SET status = 'served', served_at = COALESCE(served_at, ?), updated_at = ? WHERE order_id = ? AND status IN ('sent', 'ready') AND deleted = 0", [Clock::ms(), Clock::ms(), $orderId]);
-            foreach (Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'served'", [$orderId]) as $l) {
-                \Sofrexa\Core\Sync::touch('order_items', $l['id']);
+            foreach (Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0", [$orderId]) as $l) {
+                Db::save('order_items', ['id' => $l['id'], 'status' => 'served', 'served_at' => Clock::ms()]);
             }
             \Sofrexa\Modules\QrOrder\QrOrders::closeSessions(Db::value('SELECT table_id FROM orders WHERE id = ?', [$orderId]));
         }
@@ -514,43 +786,86 @@ final class Orders
             throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
         }
         $reason = trim($reason) ?: '—';
-        foreach ($o['lines'] as $l) {
-            if ($l['status'] !== 'void') {
-                Db::save('order_items', ['id' => $l['id'], 'status' => 'void', 'void_reason' => $reason, 'void_by' => Auth::user()['id'] ?? null, 'void_at' => Clock::ms()]);
-                if ($l['sent_at']) {
-                    \Sofrexa\Modules\Stock\Stock::giveBack($l['id'], (float) $l['qty']);
+        $ask = [];
+        Db::tx(static function () use ($o, $orderId, $reason, &$ask): void {
+            foreach (Db::rows("SELECT * FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]) as $l) {
+                // the same rules as for one line: cooked → waste, only sent → the till asks the kitchen, unsent → nothing to do
+                $cooks = $l['station'] === 'kitchen' || Db::value("SELECT 1 FROM stock_moves WHERE order_item_id = ? AND reason = 'sale' LIMIT 1", [$l['id']]);
+                $stock = $l['status'] === 'new' ? null : (in_array($l['status'], ['ready', 'served'], true) ? 'waste' : ($cooks ? 'pending' : null));
+                Db::save('order_items', ['id' => $l['id'], 'status' => 'void', 'void_reason' => $reason, 'void_by' => Auth::user()['id'] ?? null, 'void_at' => Clock::ms(), 'void_stock' => $stock]);
+                if ($stock === 'waste') {
+                    \Sofrexa\Modules\Stock\Stock::settleVoid($l['id'], 'waste');
+                } elseif ($stock === 'pending') {
+                    $ask[] = [$l['id'], (float) $l['qty']];
                 }
             }
+            Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim(($o['note'] ?? '') . ' · iptal: ' . $reason, ' ·')]);
+            self::recalc($orderId);
+            \Sofrexa\Modules\Customers\Loyalty::refund($orderId);
+        });
+        foreach ($ask as [$id, $qty]) {
+            Tickets::void($orderId, $id, $qty, $reason); // the kitchen stops cooking it
+            self::askKitchen($o, $id);
         }
-        Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim(($o['note'] ?? '') . ' · iptal: ' . $reason, ' ·')]);
-        self::recalc($orderId);
-        \Sofrexa\Modules\Customers\Loyalty::refund($orderId);
         \Sofrexa\Modules\QrOrder\QrOrders::closeSessions($o['table_id']);
         Audit::log('order.void', self::where($o) . ' · ' . Money::fmt((int) $o['total'], false, 'tr') . ' · sebep: ' . $reason, 'order', $orderId);
     }
 
     // ------------------------------------------------------------ helpers
 
-    /** Recalculates subtotal, discount, total and paid from lines, discounts and payments. */
+    /**
+     * Recalculates subtotal, discount, total and paid from lines, discounts and payments. A percentage discount follows the
+     * bill (10% stays 10% when dishes are added or voided); fixed amounts stay as given, never above the subtotal.
+     */
     public static function recalc(string $orderId): array
     {
         $sub = (int) Db::value("SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]);
-        $disc = (int) Db::value('SELECT COALESCE(SUM(amount), 0) FROM order_discounts WHERE order_id = ?', [$orderId]);
-        $disc = max(0, min($disc, $sub));
+        $disc = self::discountTotal(\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId), $sub);
         $paid = (int) Db::value('SELECT COALESCE(SUM(amount), 0) FROM payments WHERE order_id = ?', [$orderId]);
         Db::save('orders', ['id' => $orderId, 'subtotal' => $sub, 'discount' => $disc, 'total' => $sub - $disc, 'paid' => $paid]);
         return Db::row('SELECT * FROM orders WHERE id = ?', [$orderId]);
     }
 
-    /** VAT per rate for the receipt and reports: [rate => [gross, vat]]. */
+    /** VAT per rate for the receipt and reports: [rate => [gross, vat]]; the gross parts always add up to the bill total. */
     public static function vat(string $orderId): array
     {
-        $o = Db::row('SELECT subtotal, discount FROM orders WHERE id = ?', [$orderId]);
-        $factor = (int) $o['subtotal'] > 0 ? 1 - (int) $o['discount'] / (int) $o['subtotal'] : 1;
+        $o = Db::row('SELECT total FROM orders WHERE id = ?', [$orderId]);
+        return self::vatSplit(Db::pairs("SELECT vat_rate, SUM(ROUND(qty * (unit_price + mods_price))) FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void' GROUP BY vat_rate", [$orderId]), (int) ($o['total'] ?? 0));
+    }
+
+    /**
+     * Spreads a bill's total over its VAT rates in proportion to the lines (the discount comes off every rate alike).
+     * Whole kuruş that rounding leaves over go to the largest remainders (ties: the higher rate), so the parts add up to
+     * the total exactly and the receipt, the Z report and the accountant's file show the same figures.
+     * $gross: rate => line amount before the discount. Returns rate => [gross, vat].
+     */
+    public static function vatSplit(array $gross, int $total): array
+    {
+        $gross = array_filter(array_map('intval', $gross), static fn(int $g): bool => $g > 0);
+        $sub = array_sum($gross);
+        if ($sub <= 0) {
+            return [];
+        }
+        $parts = [];
+        $rest = [];
+        foreach ($gross as $rate => $g) {
+            $exact = $g * $total / $sub;
+            $parts[(string) (float) $rate] = (int) floor($exact);
+            $rest[(string) (float) $rate] = $exact - floor($exact);
+        }
+        $left = $total - array_sum($parts);
+        uksort($rest, static fn(string $a, string $b): int => [$rest[$b], (float) $b] <=> [$rest[$a], (float) $a]);
+        foreach (array_keys($rest) as $rate) {
+            if ($left <= 0) {
+                break;
+            }
+            $parts[$rate]++;
+            $left--;
+        }
+        ksort($parts, SORT_NUMERIC);
         $out = [];
-        foreach (Db::rows("SELECT vat_rate, SUM(ROUND(qty * (unit_price + mods_price))) AS gross FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void' GROUP BY vat_rate", [$orderId]) as $r) {
-            $gross = (int) round((int) $r['gross'] * $factor);
-            $out[(string) (float) $r['vat_rate']] = [$gross, Money::vatOf($gross, (float) $r['vat_rate'])];
+        foreach ($parts as $rate => $g) {
+            $out[(string) $rate] = [$g, Money::vatOf($g, (float) $rate)];
         }
         return $out;
     }

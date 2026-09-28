@@ -300,16 +300,69 @@ final class Stock
         }
     }
 
-    /** Gives back the ingredients of a voided sent line (all of it, or $qty portions). */
-    public static function giveBack(string $lineId, float $qty): void
+    /**
+     * What a sent line really took from stock and how much of it already left the sale again (void moves):
+     * stock_item_id => [taken, back, cost]; cost = the unit cost it was taken at.
+     */
+    private static function taken(string $lineId): array
     {
-        $l = Db::row('SELECT item_id FROM order_items WHERE id = ?', [$lineId]);
-        if (!$l || !$l['item_id'] || !Db::value("SELECT 1 FROM stock_moves WHERE order_item_id = ? AND reason = 'sale'", [$lineId])) {
+        $out = [];
+        foreach (Db::rows("SELECT stock_item_id AS id, reason, SUM(qty) AS q, SUM(qty * unit_cost) AS v FROM stock_moves
+            WHERE order_item_id = ? AND reason IN ('sale', 'void') GROUP BY stock_item_id, reason", [$lineId]) as $m) {
+            $out[$m['id']] ??= ['taken' => 0.0, 'back' => 0.0, 'cost' => 0.0];
+            if ($m['reason'] === 'sale') {
+                $out[$m['id']]['taken'] = -(float) $m['q'];
+                $out[$m['id']]['cost'] = (float) $m['q'] != 0.0 ? (float) $m['v'] / (float) $m['q'] : 0.0;
+            } else {
+                $out[$m['id']]['back'] = (float) $m['q'];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The ingredients of a voided line leave the sale: $how 'return' puts them back on the shelf (not cooked), 'waste'
+     * books them as waste (cooked). Worked out from what the line really took when it was sent — not from today's recipe or
+     * price — per portion sent, and never more than is still out: voiding the same portions again gives nothing back.
+     */
+    public static function settleVoid(string $voidLineId, string $how): void
+    {
+        $v = Db::row('SELECT id, qty, void_of FROM order_items WHERE id = ?', [$voidLineId]);
+        if (!$v) {
             return;
         }
+        $source = $v['void_of'] ?: $v['id'];
+        $src = Db::row('SELECT qty, sent_qty FROM order_items WHERE id = ?', [$source]);
+        $sent = (float) ($src['sent_qty'] ?? 0) > 0 ? (float) $src['sent_qty'] : (float) ($src['qty'] ?? 0);
+        if ($sent <= 0) {
+            return;
+        }
+        $share = min(1.0, (float) $v['qty'] / $sent);
         $now = Clock::ms();
-        foreach (self::needs('item', $l['item_id'], $qty) as $sid => $q) {
-            Db::append('stock_moves', ['stock_item_id' => $sid, 'qty' => round($q, 4), 'unit_cost' => self::unitCost($sid), 'reason' => 'void', 'order_item_id' => $lineId, 'at' => $now]);
+        foreach (self::taken($source) as $sid => $t) {
+            $q = round(min($t['taken'] * $share, $t['taken'] - $t['back']), 4);
+            if ($q <= 0) {
+                continue;
+            }
+            Db::append('stock_moves', ['stock_item_id' => $sid, 'qty' => $q, 'unit_cost' => $t['cost'], 'reason' => 'void', 'order_item_id' => $source, 'at' => $now]);
+            if ($how === 'waste') {
+                Db::append('stock_moves', ['stock_item_id' => $sid, 'qty' => -$q, 'unit_cost' => $t['cost'], 'reason' => 'waste:iptal', 'order_item_id' => $voidLineId, 'at' => $now]);
+            }
+        }
+    }
+
+    /** A cancelled dish booked as waste went to another bill after all: its ingredients count as that line's sale. */
+    public static function reuseWaste(string $voidLineId, string $newLineId): void
+    {
+        $now = Clock::ms();
+        foreach (Db::rows("SELECT stock_item_id AS id, SUM(qty) AS q, SUM(qty * unit_cost) AS v FROM stock_moves WHERE order_item_id = ? AND reason LIKE 'waste%' GROUP BY stock_item_id", [$voidLineId]) as $m) {
+            $q = -(float) $m['q'];
+            if ($q <= 0) {
+                continue;
+            }
+            $cost = (float) $m['v'] / (float) $m['q'];
+            Db::append('stock_moves', ['stock_item_id' => $m['id'], 'qty' => round($q, 4), 'unit_cost' => $cost, 'reason' => 'waste:iptal', 'order_item_id' => $voidLineId, 'at' => $now]);
+            Db::append('stock_moves', ['stock_item_id' => $m['id'], 'qty' => -round($q, 4), 'unit_cost' => $cost, 'reason' => 'sale', 'order_item_id' => $newLineId, 'at' => $now]);
         }
     }
 

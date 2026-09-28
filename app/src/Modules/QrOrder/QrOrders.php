@@ -123,10 +123,30 @@ final class QrOrders
         return Db::row('SELECT * FROM qr_sessions WHERE table_id = ? AND closed_at IS NULL AND deleted = 0 ORDER BY opened_at DESC, rowid DESC LIMIT 1', [$tableId]) ?: null;
     }
 
-    /** Whether the next order from this table waits for a waiter. */
-    public static function needsApproval(?array $session): bool
+    /**
+     * Whether the next order from this phone at this table waits for a waiter. A waiter's approval trusts the phone it came
+     * from, not the whole table: a photo of the table card on another phone is asked about once (decision 37).
+     */
+    public static function needsApproval(?array $session, ?string $device = null): bool
     {
-        return (bool) Settings::get('qr.require_first_approval', true) && !($session && $session['approved_at']);
+        if (!Settings::get('qr.require_first_approval', true)) {
+            return false;
+        }
+        return !($session && $session['approved_at'] && $device !== null && in_array($device, json_arr((string) ($session['devices'] ?? '[]')), true));
+    }
+
+    /** This phone, as the orders and the table session know it: a hash of a random id kept in its session. */
+    public static function device(): string
+    {
+        $_SESSION['qr_dev'] ??= bin2hex(random_bytes(16));
+        return substr(hash('sha256', 'qr-device:' . $_SESSION['qr_dev']), 0, 32);
+    }
+
+    /** An order only counts once all its lines are here (a web order may arrive in two sync batches). */
+    public static function complete(array $o): bool
+    {
+        return $o['lines_expected'] === null
+            || (int) Db::value('SELECT COUNT(*) FROM order_items WHERE order_id = ? AND deleted = 0', [$o['id']]) >= (int) $o['lines_expected'];
     }
 
     /**
@@ -138,7 +158,7 @@ final class QrOrders
         if (self::availability() !== 'open') {
             throw new \InvalidArgumentException(I18n::t('qr.err_closed'));
         }
-        if (!RateLimit::hit('qr:order:' . $table['id'] . ':' . ($_SERVER['REMOTE_ADDR'] ?? ''), 8, 600_000)) {
+        if (!RateLimit::hit('qr:order:' . $table['id'] . ':' . \Sofrexa\Core\Net::clientIp(), 8, 600_000)) {
             throw new \InvalidArgumentException(I18n::t('qr.err_limit'));
         }
         $clean = [];
@@ -157,7 +177,8 @@ final class QrOrders
         foreach ($clean as $l) {
             self::checkItem($l['item'], $l['mods']);
         }
-        [$orderId, $sessionId] = Db::tx(static function () use ($table, $clean, $note): array {
+        $device = self::device();
+        [$orderId, $sessionId] = Db::tx(static function () use ($table, $clean, $note, $device): array {
             $s = self::session($table['id']);
             $sid = $s['id'] ?? Db::save('qr_sessions', ['table_id' => $table['id'], 'token' => bin2hex(random_bytes(8)), 'opened_at' => Clock::ms()]);
             $oid = Orders::create('qr', ['status' => 'pending', 'table_id' => $table['id'], 'qr_session_id' => $sid, 'waiter_id' => null,
@@ -166,6 +187,9 @@ final class QrOrders
                 $lid = Orders::addItem($oid, $l['item'], $l['qty'], $l['mods'], $l['note']);
                 Db::save('order_items', ['id' => $lid, 'src_order_id' => $oid]);
             }
+            // written last, so the order row is queued for sync after its lines
+            Db::save('orders', ['id' => $oid, 'qr_device' => $device,
+                'lines_expected' => (int) Db::value('SELECT COUNT(*) FROM order_items WHERE order_id = ? AND deleted = 0', [$oid])]);
             return [$oid, $sid];
         });
         if (self::owner()) {
@@ -202,9 +226,12 @@ final class QrOrders
             return 0;
         }
         $n = 0;
-        foreach (Db::rows("SELECT id, qr_session_id FROM orders WHERE channel = 'qr' AND status = 'pending' AND intake_at IS NULL AND deleted = 0 ORDER BY opened_at, rowid") as $o) {
+        foreach (Db::rows("SELECT id, qr_session_id, qr_device, lines_expected FROM orders WHERE channel = 'qr' AND status = 'pending' AND intake_at IS NULL AND deleted = 0 ORDER BY opened_at, rowid") as $o) {
+            if (!self::complete($o)) {
+                continue; // the rest of its lines come with the next sync batch
+            }
             $s = $o['qr_session_id'] ? Db::row('SELECT * FROM qr_sessions WHERE id = ?', [$o['qr_session_id']]) : null;
-            if (!self::needsApproval($s && !$s['closed_at'] ? $s : null)) {
+            if (!self::needsApproval($s && !$s['closed_at'] ? $s : null, $o['qr_device'])) {
                 self::accept($o['id'], null);
             } else {
                 Db::save('orders', ['id' => $o['id'], 'intake_at' => Clock::ms()]);
@@ -253,8 +280,14 @@ final class QrOrders
         $now = Clock::ms();
         $lines = array_column(Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId]), 'id');
         $target = Db::tx(static function () use ($o, $userId, $now, $lines): string {
-            if ($userId && $o['qr_session_id'] && !Db::value('SELECT approved_at FROM qr_sessions WHERE id = ?', [$o['qr_session_id']])) {
-                Db::save('qr_sessions', ['id' => $o['qr_session_id'], 'approved_at' => $now, 'approved_by' => $userId]);
+            if ($userId && $o['qr_session_id'] && ($s = Db::row('SELECT approved_at, devices FROM qr_sessions WHERE id = ?', [$o['qr_session_id']]))) {
+                // the waiter saw this phone's order: the phone may order on its own from now on
+                $devices = json_arr((string) $s['devices']);
+                if ($o['qr_device'] && !in_array($o['qr_device'], $devices, true)) {
+                    $devices[] = $o['qr_device'];
+                }
+                Db::save('qr_sessions', ['id' => $o['qr_session_id'], 'devices' => array_values($devices)]
+                    + ($s['approved_at'] ? [] : ['approved_at' => $now, 'approved_by' => $userId]));
             }
             $stamp = ['id' => $o['id'], 'intake_at' => $o['intake_at'] ?: $now, 'approved_at' => $now, 'approved_by' => $userId];
             $main = self::mainOrder((string) $o['table_id'], $o['id']);
@@ -294,6 +327,9 @@ final class QrOrders
         }
         if ($o['status'] !== 'pending') {
             throw new \InvalidArgumentException(I18n::t('qr.err_handled'));
+        }
+        if (!self::complete($o)) {
+            throw new \InvalidArgumentException(I18n::t('sync.err_incomplete'));
         }
         return $o;
     }

@@ -69,12 +69,17 @@ final class Apply
         return Db::exec('INSERT OR IGNORE INTO ' . Db::ident($table) . ' (' . implode(',', array_map([Db::class, 'ident'], $cols)) . ') VALUES (' . Db::in($cols) . ')', array_values($row));
     }
 
+    /**
+     * Last write wins on updated_at. Two edits with the very same time are settled the same way on both sides: the till
+     * PC's version wins (the web copy takes what the PC sends on a tie, the PC keeps its own), so the copies always agree.
+     */
     private static function upsert(string $table, array $row): int
     {
         $row = array_intersect_key($row, array_flip(self::cols($table)));
         $cols = array_keys($row);
         $set = implode(',', array_map(static fn(string $c): string => Db::ident($c) . ' = excluded.' . Db::ident($c), array_diff($cols, ['id'])));
+        $wins = App::isWeb() ? '>=' : '>';
         return Db::exec('INSERT INTO ' . Db::ident($table) . ' (' . implode(',', array_map([Db::class, 'ident'], $cols)) . ') VALUES (' . Db::in($cols) . ')
-            ON CONFLICT(id) DO UPDATE SET ' . $set . ' WHERE excluded.updated_at > ' . Db::ident($table) . '.updated_at', array_values($row));
+            ON CONFLICT(id) DO UPDATE SET ' . $set . ' WHERE excluded.updated_at ' . $wins . ' ' . Db::ident($table) . '.updated_at', array_values($row));
     }
 }

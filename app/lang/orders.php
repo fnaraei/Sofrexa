@@ -169,6 +169,12 @@ return [
     'order.err_stock' => ['{name}: yalnızca {n} kaldı', '{name}: only {n} left', '{name}: فقط {n} مانده', '{name}: осталось {n}'],
     'order.err_table_busy' => ['Bu masa dolu', 'That table is busy', 'این میز پر است', 'Этот стол занят'],
     'order.err_no_shift' => ['Kasa vardiyası kapalı — önce vardiyayı açın', 'The till shift is closed — open it first', 'شیفت صندوق بسته است — اول شیفت را باز کنید', 'Смена закрыта — сначала откройте её'],
+    'order.err_split_paid' => ['Ödenen tutar kalan hesabı aşar; bu ürünler ayrılamaz', 'More was paid than would stay on this bill; these items can’t be split off', 'مبلغ پرداخت‌شده از باقی صورتحساب بیشتر می‌شود؛ این اقلام جدا نمی‌شوند', 'Оплачено больше, чем останется в счёте — эти позиции не отделить'],
+    'order.err_voided' => ['Bu ürün zaten iptal edildi', 'This item is already voided', 'این قلم قبلاً لغو شده است', 'Эта позиция уже отменена'],
+    'order.err_required' => ['{name}: bir seçim yapın', '{name}: make a choice', '{name}: یک گزینه انتخاب کنید', '{name}: сделайте выбор'],
+    'order.err_option' => ['Bu ürünün seçeneği değil', 'Not an option of this dish', 'این گزینه مال این غذا نیست', 'Это не вариант этого блюда'],
+    'pay.err_number' => ['Geçerli bir tutar yazın', 'Type a valid amount', 'مبلغ معتبر بنویسید', 'Введите корректную сумму'],
+    'pay.free_done' => ['Hesap ₺0 ile kapatıldı', 'Bill closed at ₺0', 'صورتحساب با ₺0 بسته شد', 'Счёт закрыт на ₺0'],
 
     // ------------------------------------------------------------ till (C1, C8)
     'cash.title' => ['Kasa', 'Till', 'صندوق', 'Касса'],

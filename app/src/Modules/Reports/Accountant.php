@@ -31,23 +31,29 @@ final class Accountant
     public static function tables(int $from, int $to, array $parts): array
     {
         $L = static fn(int $k): float => round($k / 100, 2);
-        $fromDay = date('Y-m-d', intdiv($from, 1000));
-        $toDay = date('Y-m-d', intdiv($to - 1, 1000));
+        [$fromDay, $toDay] = \Sofrexa\Core\Clock::days($from, $to, (int) Settings::get('day.rollover_hour', 5));
         $out = [];
         if (in_array('sales', $parts, true)) {
-            $rates = array_map('floatval', array_keys(Reports::vatByRate($from, $to)));
+            // one set of bills and one day for every column: the business day each bill was settled on, its receipt's VAT
+            $byDay = [];
+            foreach (Reports::bills($from, $to) as $b) {
+                $byDay[$b['day']][] = $b;
+            }
+            ksort($byDay);
+            $sums = array_map([Reports::class, 'sum'], $byDay);
+            $rates = [];
+            foreach ($sums as $s) {
+                $rates = array_merge($rates, array_keys($s['by_rate']));
+            }
+            $rates = array_values(array_unique(array_map('floatval', $rates)));
+            sort($rates);
             $rows = [];
-            foreach (Db::rows("SELECT day, COUNT(*) AS n, SUM(total) AS t, SUM(discount) AS d FROM orders WHERE status = 'paid' AND deleted = 0 AND closed_at >= ? AND closed_at < ? GROUP BY day ORDER BY day", [$from, $to]) as $d) {
-                [$a, $b] = \Sofrexa\Core\Clock::dayRange($d['day'], (int) Settings::get('day.rollover_hour', 5));
-                $vat = Reports::vatByRate($a, $b);
-                $row = [date('d.m.Y', (int) strtotime($d['day'])), (int) $d['n'], $L((int) $d['t']), $L((int) $d['d'])];
-                $sumVat = 0;
+            foreach ($sums as $day => $s) {
+                $row = [date('d.m.Y', (int) strtotime((string) $day)), $s['bills'], $L($s['sales']), $L($s['discount'])];
                 foreach ($rates as $r) {
-                    $v = $vat[(string) $r][1] ?? 0;
-                    $sumVat += $v;
-                    $row[] = $L($v);
+                    $row[] = $L($s['by_rate'][(string) $r][1] ?? 0);
                 }
-                $row[] = $L((int) $d['t'] - $sumVat);
+                $row[] = $L($s['sales'] - $s['vat']);
                 $rows[] = $row;
             }
             $head = ['Gün', 'Hesap', 'Ciro (KDV dahil)', 'İndirim'];
@@ -59,10 +65,11 @@ final class Accountant
         }
         if (in_array('payments', $parts, true)) {
             $rows = [];
-            // grouped by the PHP time zone (the database's clock may differ on the web copy)
+            // grouped by business day in the PHP time zone (the database's clock may differ on the web copy)
             $g = [];
+            $roll = (int) Settings::get('day.rollover_hour', 5);
             foreach (Db::rows('SELECT at, method, currency, amount, amount_fx, rate FROM payments WHERE at >= ? AND at < ? ORDER BY at', [$from, $to]) as $p) {
-                $k = date('Y-m-d', intdiv((int) $p['at'], 1000)) . '|' . $p['method'] . '|' . $p['currency'];
+                $k = \Sofrexa\Core\Clock::day((int) $p['at'], $roll) . '|' . $p['method'] . '|' . $p['currency'];
                 $g[$k] ??= ['t' => 0, 'fx' => 0.0, 'rates' => []];
                 $g[$k]['t'] += (int) $p['amount'];
                 $g[$k]['fx'] += (float) $p['amount_fx'];
@@ -97,7 +104,7 @@ final class Accountant
         }
         if (in_array('payroll', $parts, true)) {
             $rows = array_map(static fn(array $p): array => [date('d.m.Y', intdiv((int) $p['at'], 1000)), (string) $p['name'], $p['period'], $p['kind'] === 'advance' ? 'Avans' : 'Maaş / prim', self::method((string) $p['method']), $L((int) $p['total'])],
-                Db::rows("SELECT p.*, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? AND p.kind <> 'accrual' ORDER BY p.at", [$from, $to]));
+                Db::rows("SELECT p.*, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? AND p.kind NOT IN ('accrual', 'charge') ORDER BY p.at", [$from, $to]));
             $out['payroll'] = ['Personel ödemeleri', ['Tarih', 'Personel', 'Dönem', 'Tür', 'Ödeme', 'Tutar'], $rows, [5], [12, 24, 10, 14, 12, 14]];
         }
         if (in_array('expenses', $parts, true)) {

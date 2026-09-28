@@ -25,11 +25,14 @@ final class NotifyController
         Response::json(['ok' => true, 'reload' => true]);
     }
 
-    /** $act: done ("Aldım", "Gidiyorum"), later ("Sonra"), prebill ("Ön hesap yazdır"). */
+    /**
+     * $act: done ("Aldım", "Gidiyorum"), later ("Sonra"), prebill ("Ön hesap yazdır"),
+     * returned / waste (a cancelled dish: "Hazırlanmadı · stoka dön" / "Hazırlandı · zayi").
+     */
     public function act(Request $req): void
     {
         $n = Db::row('SELECT * FROM notifications WHERE id = ? AND deleted = 0', [$req->param('id')]);
-        if (!$n) {
+        if (!$n || !Notify::isMine($n)) {
             throw new HttpError(404);
         }
         switch ($req->param('act')) {
@@ -37,11 +40,29 @@ final class NotifyController
                 Notify::later($n['id']);
                 break;
             case 'prebill':
+                if (!\Sofrexa\Core\Auth::can('bill.print')) {
+                    throw new HttpError(403, I18n::t('err.forbidden'));
+                }
                 if ($n['ref_type'] === 'order' && $n['ref_id']) {
                     Orders::preBill($n['ref_id']);
                 }
                 Notify::done($n['id']);
                 break;
+            case 'retry':
+                if ($n['kind'] !== 'printer') {
+                    throw new HttpError(404);
+                }
+                \Sofrexa\Print\Spooler::retryNow((string) $n['ref_id']);
+                Notify::later($n['id']);
+                Response::json(['ok' => true, 'message' => I18n::t('notif.printer_retry')]);
+            case 'returned':
+            case 'waste':
+                if ($n['kind'] !== 'void' || $n['ref_type'] !== 'order_item') {
+                    throw new HttpError(404);
+                }
+                Orders::settleVoid((string) $n['ref_id'], $req->param('act'));
+                Notify::done($n['id']);
+                Response::json(['ok' => true, 'reload' => true, 'message' => I18n::t($req->param('act') === 'returned' ? 'void.returned' : 'void.wasted')]);
             default:
                 // "Aldım" on a ready alert: the plates left the kitchen
                 if ($n['kind'] === 'ready' && $n['ref_type'] === 'order' && $n['ref_id']) {

@@ -62,9 +62,18 @@ final class Reports
                 [$from, $to] = [$start($today), $now + 1];
         }
         $len = $to - $from;
-        // a month is compared with the month before it (same number of days so far)
-        if (in_array($key, ['month', 'last_month'], true)) {
-            $pf = $start($shift(date('Y-m-d', intdiv($from, 1000)), '-1 month'));
+        // compared with the same stretch of the period before: today 05:00–14:00 with yesterday 05:00–14:00, this month
+        // so far with the same number of days of last month, this quarter/year so far with the same part of the last one
+        $first = date('Y-m-d', intdiv($from, 1000));
+        $back = match ($key) {
+            'today' => '-1 day',
+            'month', 'last_month' => '-1 month',
+            'quarter' => '-3 months',
+            'year' => '-1 year',
+            default => null,
+        };
+        if ($back !== null) {
+            $pf = $start($shift($first, $back));
             $prev = [$pf, $pf + $len];
         } else {
             $prev = [$from - $len, $from];
@@ -91,21 +100,69 @@ final class Reports
 
     // ------------------------------------------------------------ sales
 
+    /**
+     * The paid bills of a period (settled in [from, to)) or of one till shift — the one set every sales figure is read from:
+     * id, day (the business day it was settled), channel, subtotal, discount, total, guests, waiter_id and its VAT split
+     * (rate => [gross, vat]) exactly as the receipt shows it (Orders::vatSplit: the parts add up to the total).
+     */
+    public static function bills(int $from, int $to, ?string $shiftId = null): array
+    {
+        if ($shiftId !== null) {
+            // bills settled in the shift; older ones (before closed_shift_id) by the shift's hours
+            $s = Db::row('SELECT opened_at, closed_at FROM shifts WHERE id = ?', [$shiftId]);
+            $where = "o.status = 'paid' AND o.deleted = 0 AND (o.closed_shift_id = ? OR (o.closed_shift_id IS NULL AND o.closed_at >= ? AND o.closed_at < ?))";
+            $p = [$shiftId, (int) ($s['opened_at'] ?? 0), (int) (($s['closed_at'] ?? null) ?: PHP_INT_MAX)];
+        } else {
+            $where = "o.status = 'paid' AND o.deleted = 0 AND o.closed_at >= ? AND o.closed_at < ?";
+            $p = [$from, $to];
+        }
+        $gross = [];
+        foreach (Db::rows("SELECT i.order_id, i.vat_rate, SUM(ROUND(i.qty * (i.unit_price + i.mods_price))) AS g FROM order_items i JOIN orders o ON o.id = i.order_id
+            WHERE $where AND i.deleted = 0 AND i.status <> 'void' GROUP BY i.order_id, i.vat_rate", $p) as $g) {
+            $gross[$g['order_id']][(string) (float) $g['vat_rate']] = (int) $g['g'];
+        }
+        $roll = (int) Settings::get('day.rollover_hour', 5);
+        $out = [];
+        foreach (Db::rows("SELECT o.id, o.closed_at, o.channel, o.subtotal, o.discount, o.total, o.guests, o.waiter_id FROM orders o WHERE $where ORDER BY o.closed_at", $p) as $o) {
+            $out[] = ['id' => $o['id'], 'day' => Clock::day((int) $o['closed_at'], $roll), 'channel' => $o['channel'], 'subtotal' => (int) $o['subtotal'],
+                'discount' => (int) $o['discount'], 'total' => (int) $o['total'], 'guests' => (int) $o['guests'], 'waiter_id' => $o['waiter_id'],
+                'vat' => \Sofrexa\Modules\Orders\Orders::vatSplit($gross[$o['id']] ?? [], (int) $o['total'])];
+        }
+        return $out;
+    }
+
+    /** Sums of a set of bills: bills, sales, discount, discount_n, guests, vat (total) and by_rate (rate => [gross, vat]). */
+    public static function sum(array $bills): array
+    {
+        $r = ['bills' => count($bills), 'sales' => 0, 'discount' => 0, 'discount_n' => 0, 'guests' => 0, 'vat' => 0, 'by_rate' => []];
+        foreach ($bills as $b) {
+            $r['sales'] += $b['total'];
+            $r['discount'] += $b['discount'];
+            $r['discount_n'] += $b['discount'] > 0 ? 1 : 0;
+            $r['guests'] += in_array($b['channel'], ['table', 'qr'], true) ? max($b['guests'], 1) : 0;
+            foreach ($b['vat'] as $rate => [$g, $v]) {
+                $r['by_rate'][$rate] ??= [0, 0];
+                $r['by_rate'][$rate][0] += $g;
+                $r['by_rate'][$rate][1] += $v;
+                $r['vat'] += $v;
+            }
+        }
+        ksort($r['by_rate'], SORT_NUMERIC);
+        return $r;
+    }
+
     /** Sales, bills, average bill, guests, discounts, voids, VAT, food cost of a period. */
     public static function kpis(int $from, int $to): array
     {
-        $r = Db::row("SELECT COUNT(*) AS bills, COALESCE(SUM(total), 0) AS sales, COALESCE(SUM(discount), 0) AS disc,
-                SUM(CASE WHEN discount > 0 THEN 1 ELSE 0 END) AS disc_n,
-                COALESCE(SUM(CASE WHEN channel IN ('table', 'qr') THEN MAX(guests, 1) ELSE 0 END), 0) AS guests
-            FROM orders WHERE status = 'paid' AND deleted = 0 AND closed_at >= ? AND closed_at < ?", [$from, $to]);
+        $r = self::sum(self::bills($from, $to));
         $v = self::voidTotals($from, $to);
-        $sales = (int) $r['sales'];
-        $vat = self::vat($from, $to);
+        $sales = $r['sales'];
+        $vat = $r['vat'];
         $cost = self::costOfSales($from, $to);
         $net = $sales - $vat;
         // the average bill in whole lira, as on the design
-        return ['sales' => $sales, 'bills' => (int) $r['bills'], 'avg' => (int) $r['bills'] > 0 ? (int) round($sales / (int) $r['bills'] / 100) * 100 : 0,
-            'guests' => (int) $r['guests'], 'discount' => (int) $r['disc'], 'discount_n' => (int) $r['disc_n'], 'voids' => $v['amount'], 'voids_n' => $v['n'],
+        return ['sales' => $sales, 'bills' => $r['bills'], 'avg' => $r['bills'] > 0 ? (int) round($sales / $r['bills'] / 100) * 100 : 0,
+            'guests' => $r['guests'], 'discount' => $r['discount'], 'discount_n' => $r['discount_n'], 'voids' => $v['amount'], 'voids_n' => $v['n'],
             'vat' => $vat, 'net' => $net, 'cost' => $cost, 'food_cost' => $net > 0 ? $cost * 100 / $net : null];
     }
 
@@ -115,29 +172,31 @@ final class Reports
         return $before > 0 ? ($now - $before) * 100 / $before : null;
     }
 
-    /** VAT inside the paid bills (discounts spread over the lines). */
+    /** VAT inside the paid bills, as their receipts show it. */
     public static function vat(int $from, int $to): int
     {
-        return (int) round((float) Db::value("SELECT COALESCE(SUM(ROUND(i.qty * (i.unit_price + i.mods_price)) * (1.0 - CASE WHEN o.subtotal > 0 THEN o.discount * 1.0 / o.subtotal ELSE 0 END) * i.vat_rate / (100.0 + i.vat_rate)), 0)
-            FROM order_items i JOIN orders o ON o.id = i.order_id
-            WHERE o.status = 'paid' AND o.deleted = 0 AND o.closed_at >= ? AND o.closed_at < ? AND i.deleted = 0 AND i.status <> 'void'", [$from, $to]));
+        return self::sum(self::bills($from, $to))['vat'];
     }
 
     /** VAT split by rate: rate => [gross, vat]. */
     public static function vatByRate(int $from, int $to): array
     {
-        $out = [];
-        foreach (Db::rows("SELECT i.vat_rate AS rate, SUM(ROUND(i.qty * (i.unit_price + i.mods_price)) * (1.0 - CASE WHEN o.subtotal > 0 THEN o.discount * 1.0 / o.subtotal ELSE 0 END)) AS gross
-            FROM order_items i JOIN orders o ON o.id = i.order_id
-            WHERE o.status = 'paid' AND o.deleted = 0 AND o.closed_at >= ? AND o.closed_at < ? AND i.deleted = 0 AND i.status <> 'void' GROUP BY i.vat_rate ORDER BY i.vat_rate", [$from, $to]) as $r) {
-            $g = (int) round((float) $r['gross']);
-            $out[(string) (float) $r['rate']] = [$g, (int) round($g * (float) $r['rate'] / (100 + (float) $r['rate']))];
-        }
-        return $out;
+        return self::sum(self::bills($from, $to))['by_rate'];
     }
 
-    /** Cost of what was sold (recipes, from the stock moves of sales less the give-backs), kuruş, VAT excluded. */
+    /**
+     * Cost of what was sold (recipes), kuruş, VAT excluded: the ingredients of the bills settled in the period, whenever they
+     * went to the kitchen — so the food cost of a bill opened last night and paid today sits next to its sales (a give-back
+     * or a void booked as waste leaves the sale).
+     */
     public static function costOfSales(int $from, int $to): int
+    {
+        return (int) round(-(float) Db::value("SELECT COALESCE(SUM(m.qty * m.unit_cost), 0) FROM stock_moves m JOIN order_items i ON i.id = m.order_item_id JOIN orders o ON o.id = i.order_id
+            WHERE m.reason IN ('sale', 'void') AND o.status = 'paid' AND o.deleted = 0 AND o.closed_at >= ? AND o.closed_at < ?", [$from, $to]));
+    }
+
+    /** Ingredients that left the shelf for sales in the period by the time they went to the kitchen (the stock report). */
+    public static function consumption(int $from, int $to): int
     {
         return (int) round(-(float) Db::value("SELECT COALESCE(SUM(qty * unit_cost), 0) FROM stock_moves WHERE reason IN ('sale', 'void') AND at >= ? AND at < ?", [$from, $to]));
     }
@@ -274,7 +333,7 @@ final class Reports
         foreach (Db::rows("SELECT void_by, COUNT(*) AS n, SUM(ROUND(qty * (unit_price + mods_price))) AS a FROM order_items WHERE status = 'void' AND sent_at IS NOT NULL AND void_at >= ? AND void_at < ? GROUP BY void_by", [$from, $to]) as $v) {
             $voids[(string) $v['void_by']] = ['n' => (int) $v['n'], 'amount' => (int) $v['a']];
         }
-        $disc = Db::pairs("SELECT user_id, SUM(amount) FROM order_discounts WHERE kind <> 'reverse' AND COALESCE(reason, '') <> 'puan' AND at >= ? AND at < ? GROUP BY user_id", [$from, $to]);
+        $disc = self::discountsGiven($from, $to, false)['by'];
         $total = array_sum(array_column($rows, 'sales'));
         foreach ($rows as &$r) {
             $r['sales'] = (int) $r['sales'];
@@ -290,16 +349,47 @@ final class Reports
         return $rows;
     }
 
+    /**
+     * Discounts given in the period (by when they were given) as much as they take off their bills now — a percentage
+     * follows its bill, a removed one counts nothing: by (user_id => kuruş), n (bills), amount. $points: with points used.
+     */
+    public static function discountsGiven(int $from, int $to, bool $points = true): array
+    {
+        $by = [];
+        $bills = [];
+        foreach (Db::rows("SELECT DISTINCT d.order_id, o.subtotal, o.discount FROM order_discounts d JOIN orders o ON o.id = d.order_id AND o.deleted = 0 AND o.status <> 'void'
+            WHERE d.kind <> 'reverse' AND d.at >= ? AND d.at < ?", [$from, $to]) as $o) {
+            $raw = [];
+            foreach (\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($o['order_id']) as $e) {
+                $raw[] = [$e, $e['kind'] === 'pct' ? (int) round((int) $o['subtotal'] * (float) $e['value'] / 100) : (int) $e['amount']];
+            }
+            $all = array_sum(array_column($raw, 1));
+            $scale = $all > 0 ? min(1.0, (int) $o['discount'] / $all) : 0.0; // what the bill could really take
+            foreach ($raw as [$e, $a]) {
+                if ((int) $e['at'] < $from || (int) $e['at'] >= $to || (!$points && $e['reason'] === 'puan')) {
+                    continue;
+                }
+                $v = (int) round($a * $scale);
+                if ($v > 0) {
+                    $by[(string) $e['user_id']] = ($by[(string) $e['user_id']] ?? 0) + $v;
+                    $bills[$o['order_id']] = true;
+                }
+            }
+        }
+        return ['by' => $by, 'n' => count($bills), 'amount' => array_sum($by)];
+    }
+
     /** Kitchen speed: average preparation (min), late share and count, slowest item. */
     public static function kitchen(int $from, int $to): array
     {
         $late = max(3, (int) Settings::get('order.late_minutes', 20));
-        $r = Db::row('SELECT COUNT(*) AS n, AVG(ready_at - sent_at) AS avg, SUM(CASE WHEN ready_at - sent_at > ? THEN 1 ELSE 0 END) AS late
+        // CAST: PDO sends numbers as text, and a difference (no column affinity) would compare below any text
+        $r = Db::row('SELECT COUNT(*) AS n, AVG(ready_at - sent_at) AS avg, SUM(CASE WHEN ready_at - sent_at > CAST(? AS INTEGER) THEN 1 ELSE 0 END) AS late
             FROM order_items WHERE ready_at IS NOT NULL AND sent_at >= ? AND sent_at < ? AND deleted = 0 AND station = ?', [$late * 60_000, $from, $to, 'kitchen']);
         $slow = Db::row("SELECT MAX(name) AS name, AVG(ready_at - sent_at) AS avg FROM order_items WHERE ready_at IS NOT NULL AND sent_at >= ? AND sent_at < ? AND deleted = 0 AND station = 'kitchen'
             GROUP BY item_id HAVING COUNT(*) >= 3 ORDER BY avg DESC LIMIT 1", [$from, $to]);
         $late_n = (int) $r['late'];
-        $orders = (int) Db::value("SELECT COUNT(DISTINCT order_id) FROM order_items WHERE ready_at IS NOT NULL AND sent_at >= ? AND sent_at < ? AND deleted = 0 AND station = 'kitchen' AND ready_at - sent_at > ?", [$from, $to, $late * 60_000]);
+        $orders = (int) Db::value("SELECT COUNT(DISTINCT order_id) FROM order_items WHERE ready_at IS NOT NULL AND sent_at >= ? AND sent_at < ? AND deleted = 0 AND station = 'kitchen' AND ready_at - sent_at > CAST(? AS INTEGER)", [$from, $to, $late * 60_000]);
         return ['avg' => $r['avg'] ? (int) round((float) $r['avg'] / 60_000) : null, 'late_pct' => (int) $r['n'] > 0 ? $late_n * 100 / (int) $r['n'] : null,
             'late_orders' => $orders, 'late_min' => $late, 'target' => (int) Settings::get('kds.late_minutes', 15),
             'slowest' => $slow ? ['name' => $slow['name'], 'min' => (int) round((float) $slow['avg'] / 60_000)] : null];
@@ -319,18 +409,20 @@ final class Reports
     {
         $s = Db::row('SELECT s.*, u.name FROM shifts s LEFT JOIN users u ON u.id = s.user_id WHERE s.id = ?', [$shiftId]) ?? throw new \Sofrexa\Core\HttpError(404);
         $sum = \Sofrexa\Modules\Orders\Shifts::summary($shiftId);
-        $paidIn = "SELECT order_id FROM payments WHERE shift_id = ? AND order_id IS NOT NULL";
-        $o = Db::row("SELECT COUNT(*) AS bills, COALESCE(SUM(total), 0) AS sales, COALESCE(SUM(discount), 0) AS disc, SUM(CASE WHEN discount > 0 THEN 1 ELSE 0 END) AS disc_n,
-                COALESCE(SUM(CASE WHEN channel IN ('table', 'qr') THEN MAX(guests, 1) ELSE 0 END), 0) AS guests
-            FROM orders WHERE status = 'paid' AND deleted = 0 AND id IN ($paidIn)", [$shiftId]);
+        // sales: the bills settled in this shift (a bill paid half here and half in the next one is a sale of the next one);
+        // money: every payment taken in this shift, whichever bill it was for
+        $bills = self::bills(0, 0, $shiftId);
+        $o = self::sum($bills);
         $vat = [];
-        foreach (Db::rows("SELECT i.vat_rate AS rate, SUM(ROUND(i.qty * (i.unit_price + i.mods_price)) * (1.0 - CASE WHEN o.subtotal > 0 THEN o.discount * 1.0 / o.subtotal ELSE 0 END)) AS gross
-            FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'paid' AND o.id IN ($paidIn) AND i.status <> 'void' AND i.deleted = 0 GROUP BY i.vat_rate", [$shiftId]) as $v) {
-            if ((float) $v['rate'] > 0) {
-                $vat[(string) (float) $v['rate']] = (int) round((float) $v['gross'] * (float) $v['rate'] / (100 + (float) $v['rate']));
+        foreach ($o['by_rate'] as $rate => [, $v]) {
+            if ((float) $rate > 0) {
+                $vat[$rate] = $v;
             }
         }
-        $ch = array_map('intval', Db::pairs("SELECT channel, SUM(total) FROM orders WHERE status = 'paid' AND deleted = 0 AND id IN ($paidIn) GROUP BY channel", [$shiftId]));
+        $ch = [];
+        foreach ($bills as $b) {
+            $ch[$b['channel']] = ($ch[$b['channel']] ?? 0) + $b['total'];
+        }
         $fx = Db::rows("SELECT currency, SUM(amount_fx) AS fx, SUM(amount) AS try, AVG(rate) AS rate FROM payments WHERE shift_id = ? AND method = 'cash' AND currency <> 'TRY' AND order_id IS NOT NULL GROUP BY currency", [$shiftId]);
         $cashTry = (int) Db::value("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE shift_id = ? AND method = 'cash' AND currency = 'TRY' AND order_id IS NOT NULL", [$shiftId]);
         $methods = array_map('intval', Db::pairs("SELECT method, SUM(amount) FROM payments WHERE shift_id = ? AND order_id IS NOT NULL GROUP BY method", [$shiftId]));
@@ -341,8 +433,8 @@ final class Reports
         $counted = json_arr($s['counted']);
         $expected = $s['expected'] !== null ? json_arr($s['expected']) : $sum['cash'];
         $collect = (int) Db::value("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE shift_id = ? AND order_id IS NULL", [$shiftId]);
-        return ['s' => $s, 'sum' => $sum, 'bills' => (int) $o['bills'], 'sales' => (int) $o['sales'], 'discount' => (int) $o['disc'], 'discount_n' => (int) $o['disc_n'],
-            'guests' => (int) $o['guests'], 'vat' => $vat, 'channels' => $ch, 'fx' => $fx, 'cash_try' => $cashTry, 'methods' => $methods, 'courier' => $courier,
+        return ['s' => $s, 'sum' => $sum, 'bills' => $o['bills'], 'sales' => $o['sales'], 'discount' => $o['discount'], 'discount_n' => $o['discount_n'],
+            'guests' => $o['guests'], 'vat' => $vat, 'channels' => $ch, 'fx' => $fx, 'cash_try' => $cashTry, 'methods' => $methods, 'courier' => $courier,
             'open' => ['n' => (int) $open['n'], 'amount' => (int) $open['a']], 'counted' => $counted, 'expected' => $expected, 'collections' => $collect,
             'note' => (string) (json_arr($s['note'])['close'] ?? ''), 'closed' => (bool) $s['closed_at']];
     }
@@ -364,9 +456,9 @@ final class Reports
             $out[] = ['x-circle', 'danger', t('rep.att_voids', ['n' => digits($v['n']), 'amount' => money($v['amount'])])
                 . ($top && (int) $top['n'] > 1 ? ' · ' . t('rep.att_voids_t', ['n' => digits((int) $top['n']), 't' => digits((string) $top['number'])]) : '')];
         }
-        $d = Db::row("SELECT COUNT(DISTINCT order_id) AS n, COALESCE(SUM(amount), 0) AS a FROM order_discounts WHERE kind <> 'reverse' AND at >= ? AND at < ?", [$from, $to]);
-        if ((int) $d['n'] > 0) {
-            $out[] = ['percent', 'warning', t('rep.att_disc', ['n' => digits((int) $d['n']), 'amount' => money((int) $d['a'])])];
+        $d = self::discountsGiven($from, $to);
+        if ($d['n'] > 0) {
+            $out[] = ['percent', 'warning', t('rep.att_disc', ['n' => digits($d['n']), 'amount' => money($d['amount'])])];
         }
         foreach (Rates::detail() as $cur => $r) {
             if ($r['accepted'] && $r['at'] && date('Y-m-d', intdiv((int) $r['at'], 1000)) !== date('Y-m-d')) {

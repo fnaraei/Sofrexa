@@ -48,7 +48,11 @@ return [
         Orders::send($o);
         same(9.64, Stock::onHand($meat), '2 portions take 0,36 kg meat');
         Orders::voidLine($l, 'müşteri vazgeçti', 1);
-        same(9.82, Stock::onHand($meat), 'one portion comes back');
+        same(9.64, Stock::onHand($meat), 'only sent: nothing moves until the till asks the kitchen');
+        $void = (string) Db::value("SELECT id FROM order_items WHERE void_of = ? AND status = 'void'", [$l]);
+        same('pending', Db::value('SELECT void_stock FROM order_items WHERE id = ?', [$void]));
+        Orders::settleVoid($void, 'returned');
+        same(9.82, Stock::onHand($meat), 'not made: one portion comes back');
         try {
             Stock::setRecipe('stock', $meat, [['stock_item_id' => $mix, 'qty' => 1]]);
             Stock::setRecipe('stock', $mix, [['stock_item_id' => $mix, 'qty' => 1]]);

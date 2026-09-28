@@ -15,10 +15,8 @@ if (PHP_SAPI === 'cli-server' && $path !== '/' && is_file(__DIR__ . $path)) {
 
 // Uploaded media (menu photos, logo, receipts) live outside the web root.
 if (str_starts_with($path, '/media/')) {
-    $rel = substr(rawurldecode($path), 7);
-    $base = realpath(App::storage('uploads'));
-    $file = $base ? realpath($base . '/' . $rel) : false;
-    if (!$file || !str_starts_with($file, $base) || !is_file($file) || str_starts_with($rel, 'private/')) {
+    $file = \Sofrexa\Core\Media::publicFile($path);
+    if ($file === null) {
         http_response_code(404);
         exit;
     }

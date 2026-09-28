@@ -14,13 +14,13 @@
     return S.lang === 'fa' ? S.digits(s.replace(/\./g, '٬').replace(/,/g, '٫')) : s;
   };
   const fxText = (cur, v) => (cur === 'TRY' ? S.money(Math.round(v * 100)) : sym(cur) + num2(v, Math.abs(v % 1) > 0.0001 ? 2 : 0));
-  /** "1.234,50" / "70" / "۷۰" → 1234.5 */
+  /** "1.234,50" / "36.82" / "۳۶٫۸۲" → number; 0 when it is not a number. The same rules as Money::number on the server. */
   const parse = s => {
-    s = String(s || '').trim().replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٬\s₺£$€]/g, '').replace('٫', ',');
-    if (s.indexOf(',') !== -1) s = s.replace(/\./g, '').replace(',', '.');
-    else if ((s.match(/\./g) || []).length > 1 || /\.\d{3}$/.test(s)) s = s.replace(/\./g, '');
-    const v = parseFloat(s);
-    return isNaN(v) ? 0 : v;
+    s = String(s || '').trim().replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+      .replace(/٫/g, ',').replace(/−/g, '-').replace(/[٬\s  ₺£$€]|TL|TRY|GBP|USD|EUR/g, '');
+    if (/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(s) || /^-?\d+(,\d+)?$/.test(s)) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    if (/^-?\d+(\.\d+)?$/.test(s)) return parseFloat(s);
+    return 0;
   };
   const method = () => (form.querySelector('[name=method]:checked') || {}).value || 'cash';
   const currency = () => (form.querySelector('[name=currency]:checked') || {}).value || 'TRY';

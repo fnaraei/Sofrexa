@@ -204,15 +204,14 @@ final class Tickets
         $p->pair(date('d.m.Y', intdiv((int) $s['opened_at'], 1000)), date('H:i', intdiv((int) $s['opened_at'], 1000)) . '-' . date('H:i', intdiv((int) ($s['closed_at'] ?: \Sofrexa\Core\Clock::ms()), 1000)));
         $p->pair('Kapatan', self::first((string) (\Sofrexa\Core\Auth::user()['name'] ?? $s['name'])));
         $p->hr();
-        $paidIn = "SELECT order_id FROM payments WHERE shift_id = ? AND order_id IS NOT NULL";
-        $guests = (int) Db::value("SELECT COALESCE(SUM(guests), 0) FROM orders WHERE status = 'paid' AND id IN ($paidIn)", [$shiftId]);
-        $gross = (int) $sum['orders']['total'] + (int) $sum['orders']['discount'];
-        $p->pair('Hesap sayısı', (string) $sum['orders']['n'])->pair('Misafir', (string) $guests)->pair('Brüt satış', self::tl($gross))->pair('İndirim', '-' . self::tl((int) $sum['orders']['discount']));
-        $p->bold()->pair('CİRO (KDV dahil)', self::tl((int) $sum['orders']['total']))->bold(false);
-        foreach (Db::rows("SELECT l.vat_rate, SUM(ROUND(l.qty * (l.unit_price + l.mods_price) * (1.0 - CAST(o.discount AS REAL) / MAX(o.subtotal, 1)))) AS gross
-            FROM order_items l JOIN orders o ON o.id = l.order_id WHERE o.status = 'paid' AND o.id IN ($paidIn) AND l.status <> 'void' AND l.deleted = 0 GROUP BY l.vat_rate", [$shiftId]) as $v) {
-            if ((float) $v['vat_rate'] > 0) {
-                $p->pair('KDV %' . I18n::num((float) $v['vat_rate'], 0, 'tr'), self::tl(Money::vatOf((int) $v['gross'], (float) $v['vat_rate'])));
+        // the bills settled in this shift, with the VAT their receipts show (the same figures as the R3 screen)
+        $bills = \Sofrexa\Modules\Reports\Reports::sum(\Sofrexa\Modules\Reports\Reports::bills(0, 0, $shiftId));
+        $gross = $bills['sales'] + $bills['discount'];
+        $p->pair('Hesap sayısı', (string) $bills['bills'])->pair('Misafir', (string) $bills['guests'])->pair('Brüt satış', self::tl($gross))->pair('İndirim', '-' . self::tl($bills['discount']));
+        $p->bold()->pair('CİRO (KDV dahil)', self::tl($bills['sales']))->bold(false);
+        foreach ($bills['by_rate'] as $rate => [, $vat]) {
+            if ((float) $rate > 0) {
+                $p->pair('KDV %' . I18n::num((float) $rate, 0, 'tr'), self::tl($vat));
             }
         }
         $p->pair('İptal (' . $sum['voids']['n'] . ' ürün)', self::tl((int) $sum['voids']['amount']));

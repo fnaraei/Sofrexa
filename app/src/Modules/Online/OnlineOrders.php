@@ -214,6 +214,8 @@ final class OnlineOrders
                     'status' => 'served', 'created_at' => Clock::ms(), 'served_at' => Clock::ms()]);
                 Orders::recalc($id);
             }
+            // written last, so the order row is queued for sync after its lines (the till waits for all of them)
+            Db::save('orders', ['id' => $id, 'lines_expected' => (int) Db::value('SELECT COUNT(*) FROM order_items WHERE order_id = ? AND deleted = 0', [$id])]);
             return $id;
         });
         $o = Orders::get($orderId);
@@ -233,6 +235,9 @@ final class OnlineOrders
         }
         $n = 0;
         foreach (Db::rows("SELECT * FROM orders WHERE channel = 'online' AND status = 'pending' AND intake_at IS NULL AND deleted = 0 ORDER BY opened_at, rowid") as $o) {
+            if (!QrOrders::complete($o)) {
+                continue; // the rest of its lines come with the next sync batch
+            }
             Db::save('orders', ['id' => $o['id'], 'intake_at' => Clock::ms()]);
             $d = json_arr($o['delivery']);
             Notify::push('online', ['where' => Orders::where($o), 'what' => I18n::t(($d['type'] ?? 'delivery') === 'pickup' ? 'on.type_pickup' : 'on.type_delivery', [], 'tr')
@@ -248,6 +253,9 @@ final class OnlineOrders
         $o = Orders::editable($orderId);
         if ($o['channel'] !== 'online' || $o['status'] !== 'pending') {
             throw new \InvalidArgumentException(I18n::t('qr.err_handled'));
+        }
+        if (!QrOrders::complete($o)) {
+            throw new \InvalidArgumentException(I18n::t('sync.err_incomplete'));
         }
         $minutes = max(5, min(240, $minutes ?: self::etaMid()));
         $d = $o['delivery'];
@@ -385,10 +393,18 @@ final class OnlineOrders
                 'cancelled' => 'cancelled',
                 default => null,
             };
-            if ($key === null || Db::value('SELECT 1 FROM online_mail WHERE order_id = ? AND stage = ?', [$o['id'], $key])) {
+            if ($key === null) {
                 continue;
             }
-            Db::exec('INSERT OR IGNORE INTO online_mail (order_id, stage, at) VALUES (?, ?, ?)', [$o['id'], $key, Clock::ms()]);
+            // claimed before sending (two runs at once must not mail twice); marked sent only when the mail server took it,
+            // otherwise tried again later (1, 2, 4 … minutes, at most 8 times) — a mail server hiccup does not lose the e-mail
+            $now = Clock::ms();
+            $claimed = Db::exec("INSERT OR IGNORE INTO online_mail (order_id, stage, at, status, tries) VALUES (?, ?, ?, 'sending', 0)", [$o['id'], $key, $now])
+                || Db::exec("UPDATE online_mail SET status = 'sending', at = ? WHERE order_id = ? AND stage = ? AND tries < 8
+                    AND ((status = 'retry' AND COALESCE(next_at, 0) <= CAST(? AS INTEGER)) OR (status = 'sending' AND at < ?))", [$now, $o['id'], $key, $now, $now - 600_000]);
+            if (!$claimed) {
+                continue;
+            }
             $lang = (string) ($d['lang'] ?? $o['acc_lang'] ?? 'tr');
             $no = '#' . sprintf('%04d', (int) $o['no']);
             $shop = (string) Settings::get('profile.name');
@@ -396,8 +412,16 @@ final class OnlineOrders
             $body = I18n::t('on.mail_' . $key, ['name' => first_name((string) $o['customer_name']), 'no' => $no, 'shop' => $shop, 't' => (string) $t['eta'],
                 'total' => Money::fmt((int) $o['total'], false, $lang)], $lang) . "\n\n" . I18n::t('on.mail_follow', ['link' => $link], $lang)
                 . "\n\n" . $shop . ((string) Settings::get('profile.phone', '') !== '' ? ' · ' . Settings::get('profile.phone') : '');
-            Mailer::send((string) $o['email'], I18n::t('on.mail_subject_' . $key, ['no' => $no, 'shop' => $shop], $lang), $body);
-            $n++;
+            try {
+                $ok = Mailer::send((string) $o['email'], I18n::t('on.mail_subject_' . $key, ['no' => $no, 'shop' => $shop], $lang), $body);
+            } catch (\Throwable $e) {
+                App::log('mail', $e->getMessage(), ['order' => $o['id'], 'stage' => $key]);
+                $ok = false;
+            }
+            $tries = (int) Db::value('SELECT tries FROM online_mail WHERE order_id = ? AND stage = ?', [$o['id'], $key]) + 1;
+            Db::exec('UPDATE online_mail SET status = ?, tries = ?, next_at = ? WHERE order_id = ? AND stage = ?',
+                [$ok ? 'sent' : 'retry', $tries, $ok ? null : $now + 60_000 * (2 ** ($tries - 1)), $o['id'], $key]);
+            $n += $ok ? 1 : 0;
         }
         return $n;
     }

@@ -79,7 +79,7 @@ final class Request
 
     public function ip(): string
     {
-        return $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        return Net::clientIp();
     }
 
     public function header(string $name): string

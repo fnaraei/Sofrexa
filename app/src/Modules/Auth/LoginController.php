@@ -16,7 +16,8 @@ final class LoginController
             Response::redirect($next !== '/' ? $next : Shell::home());
         }
         $staff = self::staff();
-        $pinHere = Auth::pinAllowedFrom($req->ip()) && App::isPc();
+        // PIN sign-in: on the till PC's network, and on the web copy while emergency mode lets the staff work there
+        $pinHere = Auth::pinAllowedFrom($req->ip()) && (App::isPc() || \Sofrexa\Sync\Emergency::on());
         $mode = $req->str('mode') === 'password' || !$pinHere || !$staff ? 'password' : 'pin';
         if (!$staff && !Db::value('SELECT 1 FROM users WHERE deleted = 0 LIMIT 1')) {
             $mode = 'pin'; // shows the "run seed" hint

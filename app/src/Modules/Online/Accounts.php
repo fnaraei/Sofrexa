@@ -86,7 +86,7 @@ final class Accounts
         if ($err) {
             throw new ValidationError($err);
         }
-        if (!RateLimit::hit('online:signup:' . ($_SERVER['REMOTE_ADDR'] ?? ''), 10, 3_600_000)) {
+        if (!RateLimit::hit('online:signup:' . \Sofrexa\Core\Net::clientIp(), 10, 3_600_000)) {
             throw new \InvalidArgumentException(I18n::t('on.err_limit'));
         }
         $now = Clock::ms();
@@ -161,7 +161,7 @@ final class Accounts
     public static function login(string $email, string $pw, bool $remember): array
     {
         $email = self::email($email);
-        if (!RateLimit::hit('online:login:' . ($_SERVER['REMOTE_ADDR'] ?? ''), 20, 900_000) || !RateLimit::hit('online:login:' . $email, 8, 900_000)) {
+        if (!RateLimit::hit('online:login:' . \Sofrexa\Core\Net::clientIp(), 20, 900_000) || !RateLimit::hit('online:login:' . $email, 8, 900_000)) {
             throw new \InvalidArgumentException(I18n::t('on.err_limit'));
         }
         $a = self::byEmail($email);
@@ -204,7 +204,7 @@ final class Accounts
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             throw new ValidationError(['email' => I18n::t('on.err_email')]);
         }
-        if (!RateLimit::hit('online:reset:' . ($_SERVER['REMOTE_ADDR'] ?? ''), 10, 3_600_000)) {
+        if (!RateLimit::hit('online:reset:' . \Sofrexa\Core\Net::clientIp(), 10, 3_600_000)) {
             throw new \InvalidArgumentException(I18n::t('on.err_limit'));
         }
         $a = self::byEmail($email);

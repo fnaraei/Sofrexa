@@ -71,10 +71,21 @@ final class Menu
      */
     public static function soldToday(): array
     {
-        $day = Clock::day(Clock::ms(), (int) Settings::get('day.rollover_hour', 5));
+        // by the time the dish went to the kitchen (a bill opened last night may send more after the day turned)
+        $roll = (int) Settings::get('day.rollover_hour', 5);
+        $day = Clock::day(Clock::ms(), $roll);
+        [$from, $to] = Clock::dayRange($day, $roll);
         return array_map('floatval', Db::pairs("SELECT oi.item_id, SUM(oi.qty) FROM order_items oi JOIN orders o ON o.id = oi.order_id
-            WHERE o.day = ? AND oi.item_id IS NOT NULL AND oi.deleted = 0 AND oi.status IN ('sent', 'ready', 'served') AND o.status <> 'void'
-            GROUP BY oi.item_id", [$day]));
+            WHERE (oi.sent_at >= ? AND oi.sent_at < ? OR oi.sent_at IS NULL AND o.day = ?) AND oi.item_id IS NOT NULL AND oi.deleted = 0
+              AND oi.status IN ('sent', 'ready', 'served') AND o.status <> 'void'
+            GROUP BY oi.item_id", [$from, $to, $day]));
+    }
+
+    /** Portions of a dish waiting unsent in open bills (they take from today's daily stock when they are sent). */
+    public static function reserved(string $itemId): float
+    {
+        return (float) Db::value("SELECT COALESCE(SUM(l.qty), 0) FROM order_items l JOIN orders o ON o.id = l.order_id
+            WHERE l.item_id = ? AND l.status = 'new' AND l.deleted = 0 AND o.status IN ('pending', 'open', 'billed') AND o.deleted = 0", [$itemId]);
     }
 
     public static function get(string $id): array

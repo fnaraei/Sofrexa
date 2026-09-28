@@ -154,27 +154,7 @@ final class Auth
         if (!$nets || \Sofrexa\Sync\Emergency::allows($ip)) {
             return true;
         }
-        foreach ($nets as $cidr) {
-            if (self::inCidr($ip, (string) $cidr)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static function inCidr(string $ip, string $cidr): bool
-    {
-        if (!str_contains($cidr, '/')) {
-            return $ip === $cidr;
-        }
-        [$net, $bits] = explode('/', $cidr);
-        $ipL = ip2long($ip);
-        $netL = ip2long($net);
-        if ($ipL === false || $netL === false) {
-            return false;
-        }
-        $mask = -1 << (32 - (int) $bits);
-        return ($ipL & $mask) === ($netL & $mask);
+        return Net::inAny($ip, $nets);
     }
 
     public static function hashPin(string $pin): string

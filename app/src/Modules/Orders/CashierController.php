@@ -71,14 +71,27 @@ final class CashierController
         $share = $req->input('share') !== null ? min($due, max(0, $req->int('share'))) : $due;
         $method = in_array($req->str('method'), ['cash', 'card', 'account', 'mixed'], true) ? $req->str('method') : 'cash';
         $cur = strtoupper($req->str('currency', 'TRY'));
-        $cashPart = static function () use ($req, $cur): array {
+        // the same reading of "36,82", "36.82" and "۳۶٫۸۲" as on the screen; anything else is refused, not taken as 0 or 3682
+        $amount = static function (string $field) use ($req): ?float {
+            $raw = trim($req->str($field));
+            if ($raw === '') {
+                return null;
+            }
+            $v = Money::number($raw);
+            if ($v === null || $v < 0) {
+                throw new ValidationError([$field => I18n::t('pay.err_number')]);
+            }
+            return $v;
+        };
+        $cashPart = static function () use ($amount, $cur): array {
+            $v = $amount('received') ?? 0.0;
             return $cur === 'TRY'
-                ? ['method' => 'cash', 'currency' => 'TRY', 'amount' => Money::parse($req->str('received'))]
-                : ['method' => 'cash', 'currency' => $cur, 'amount_fx' => (float) str_replace(',', '.', str_replace('.', '', $req->str('received')))];
+                ? ['method' => 'cash', 'currency' => 'TRY', 'amount' => (int) round($v * 100)]
+                : ['method' => 'cash', 'currency' => $cur, 'amount_fx' => round($v, 2)];
         };
         $customer = $req->str('customer_id') ?: null;
         $parts = match ($method) {
-            'card' => [['method' => 'card', 'amount' => $req->str('card') !== '' ? Money::parse($req->str('card')) : $share]],
+            'card' => [['method' => 'card', 'amount' => ($card = $amount('card')) !== null ? (int) round($card * 100) : $share]],
             'account' => [['method' => 'account', 'amount' => $share]],
             'mixed' => (static function () use ($cashPart, $share, $cur): array {
                 $cash = $cashPart();

@@ -12,7 +12,25 @@ use Sofrexa\Core\{Auth, Clock, Db};
  */
 final class Notify
 {
-    public const KINDS = ['ready', 'qr', 'bill', 'call', 'served', 'online'];
+    public const KINDS = ['ready', 'qr', 'bill', 'call', 'served', 'online', 'void', 'printer'];
+
+    /**
+     * A notification about one order line (a cancelled dish the till decides on). It is not closed with its bill:
+     * the bill may be paid long before the kitchen answers.
+     */
+    public static function pushLine(string $kind, array $params, string $role, string $lineId): string
+    {
+        return Db::save('notifications', ['user_id' => null, 'role' => $role, 'kind' => $kind, 'title' => $params['where'] ?? null,
+            'body' => $params, 'ref_type' => 'order_item', 'ref_id' => $lineId, 'at' => Clock::ms()]);
+    }
+
+    /** Closes the open notifications of an order line. */
+    public static function closeLine(string $lineId): void
+    {
+        foreach (Db::rows("SELECT id FROM notifications WHERE ref_type = 'order_item' AND ref_id = ? AND done_at IS NULL AND deleted = 0", [$lineId]) as $n) {
+            self::done($n['id']);
+        }
+    }
 
     public static function push(string $kind, array $params, ?string $userId = null, ?string $role = null, ?string $orderId = null): string
     {
@@ -64,6 +82,13 @@ final class Notify
         }
         $roles = array_values(array_unique($roles));
         return ['(user_id = ? OR (user_id IS NULL AND role IN (' . Db::in($roles) . ')))', [$u['id'], ...$roles]];
+    }
+
+    /** Whether a notification is addressed to the signed-in user (to them, or to a role whose work they do). */
+    public static function isMine(array $n): bool
+    {
+        [$where, $p] = self::mine();
+        return (bool) Db::value("SELECT 1 FROM notifications WHERE id = ? AND $where", [$n['id'], ...$p]);
     }
 
     public static function markAllRead(): void

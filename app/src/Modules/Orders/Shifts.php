@@ -118,9 +118,9 @@ final class Shifts
             }
         }
         $methods = Db::pairs('SELECT method, SUM(amount) FROM payments WHERE shift_id = ? GROUP BY method', [$shiftId]);
-        // bills closed in this shift (an order may have been opened before the shift started)
-        $orders = Db::row("SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total, COALESCE(SUM(discount), 0) AS discount FROM orders
-            WHERE status = 'paid' AND id IN (SELECT order_id FROM payments WHERE shift_id = ? AND order_id IS NOT NULL)", [$shiftId]);
+        // bills settled in this shift (opened earlier or partly paid in an earlier shift: a sale once, where it was settled)
+        $b = \Sofrexa\Modules\Reports\Reports::sum(\Sofrexa\Modules\Reports\Reports::bills(0, 0, $shiftId));
+        $orders = ['n' => $b['bills'], 'total' => $b['sales'], 'discount' => $b['discount']];
         $s = Db::row('SELECT opened_at, closed_at FROM shifts WHERE id = ?', [$shiftId]);
         $voids = Db::row("SELECT COUNT(*) AS n, COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) AS amount FROM order_items
             WHERE status = 'void' AND sent_at IS NOT NULL AND void_at >= ? AND void_at < ?", [(int) ($s['opened_at'] ?? 0), (int) ($s['closed_at'] ?: PHP_INT_MAX)]);

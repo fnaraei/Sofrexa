@@ -17,6 +17,8 @@ $kinds = [
     'call' => ['info', 'hand'],
     'served' => ['success', 'check-circle'],
     'online' => ['attention', 'globe'],
+    'void' => ['danger', 'x-circle'],
+    'printer' => ['danger', 'printer'],
 ];
 $ago = static function (int $at): string {
     $m = intdiv(Clock::ms() - $at, 60_000);
@@ -35,6 +37,8 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
       $subText = match ($n['kind']) {
           'bill' => !empty($b['qr']) ? t('notif.bill_qr') : t('notif.bill_by', ['name' => first_name((string) ($b['by'] ?? ''))]),
           'call' => t('notif.call_qr'),
+          'void' => t('notif.void_ask', ['name' => first_name((string) ($b['by'] ?? ''))]),
+          'printer' => t('notif.printer_sub', ['n' => digits((int) ($b['n'] ?? 0))]),
           default => (string) ($b['text'] ?? $b['what'] ?? ''),
       };
       $base = '/my/notifications/' . $n['id'];
@@ -44,6 +48,10 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
           'bill' => Ui::btn(t('notif.prebill'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/prebill']]),
           'call' => Ui::btn(t('notif.going'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
           'online' => $n['ref_id'] ? Ui::btn(t('notif.review'), ['size' => 's', 'attrs' => ['data-load-sheet' => '/delivery/' . $n['ref_id'] . '/sheet']]) : Ui::btn(t('notif.review'), ['size' => 's', 'href' => '/delivery']),
+          // the till asked the kitchen: not made → back to stock; made → waste (it can still go to another bill on the waste page)
+          'void' => Ui::btn(t('notif.void_back'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/returned']])
+              . Ui::btn(t('notif.void_waste'), ['size' => 's', 'attrs' => ['data-post' => $base . '/waste']]),
+          'printer' => Ui::btn(t('notif.retry'), ['size' => 's', 'attrs' => ['data-post' => $base . '/retry']]),
           default => Ui::btn(t('notif.open'), ['size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
       }; ?>
     <article class="ncard<?= $n['read_at'] ? '' : ' is-new' ?>">

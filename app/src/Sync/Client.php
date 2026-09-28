@@ -58,6 +58,10 @@ final class Client
         $epoch = self::epoch();
         $dir = App::storage('backups');
         $zip = $dir . '/snapshot-' . bin2hex(random_bytes(4)) . '.zip';
+        // Where the queue stood when the copy was taken: everything queued up to here is in the snapshot. A change made while
+        // it is exported or uploaded is queued after this mark and still goes out with the next push.
+        $mark = (int) Db::value('SELECT COALESCE(MAX(seq), 0) FROM sync_outbox');
+        $files = self::files();
         Backup::export($zip, 'sync');
         $enc = $zip . '.enc';
         Protocol::encryptFile($zip, $enc);
@@ -67,10 +71,15 @@ final class Client
         } finally {
             @unlink($enc);
         }
-        // The web copy now holds everything we have: start the incremental queues from zero.
-        Db::exec('DELETE FROM sync_outbox');
+        // The web copy now holds everything we had at the mark: the incremental queues go on from there.
+        Db::exec('DELETE FROM sync_outbox WHERE seq <= ?', [$mark]);
         self::setState('pull_seq', '0');
-        self::setState('media_at', (string) Clock::ms());
+        Db::tx(static function () use ($files): void {
+            Db::exec('DELETE FROM sync_media');
+            foreach ($files as $rel => [$mtime, $size]) {
+                Db::exec('INSERT INTO sync_media (path, mtime, size) VALUES (?, ?, ?)', [$rel, $mtime, $size]);
+            }
+        });
         Status::markOk();
         return $epoch;
     }
@@ -88,28 +97,54 @@ final class Client
         Backup::addPlace(basename($zipPath), 'web');
     }
 
-    /** Files under storage/uploads changed since the last round. */
+    /** Public files under storage/uploads: relative path => [modified time, size]. Private ones (receipts) never leave the PC. */
+    private static function files(): array
+    {
+        $base = realpath(App::storage('uploads'));
+        if (!$base) {
+            return [];
+        }
+        $out = [];
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $f) {
+            if (!$f->isFile()) {
+                continue;
+            }
+            $rel = str_replace('\\', '/', substr($f->getPathname(), strlen($base) + 1));
+            if ($rel === 'private' || str_starts_with($rel, 'private/')) {
+                continue;
+            }
+            $out[$rel] = [(int) $f->getMTime(), (int) $f->getSize()];
+        }
+        ksort($out);
+        return $out;
+    }
+
+    /**
+     * New or changed files, compared with the list of what the web copy already has (sync_media): at most 30 a round, each
+     * written to that list as soon as the web copy took it, so the next round goes on with the 31st.
+     */
     private static function media(): int
     {
-        $since = (int) self::state('media_at', '0');
         $base = realpath(App::storage('uploads'));
         if (!$base) {
             return 0;
         }
-        $now = Clock::ms();
+        $sent = [];
+        foreach (Db::rows('SELECT path, mtime, size FROM sync_media') as $r) {
+            $sent[$r['path']] = [(int) $r['mtime'], (int) $r['size']];
+        }
         $n = 0;
-        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS));
-        foreach ($it as $f) {
-            if (!$f->isFile() || $f->getMTime() * 1000 <= $since - 2000 || str_contains($f->getPathname(), DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR)) {
+        foreach (self::files() as $rel => $stat) {
+            if (($sent[$rel] ?? null) === $stat) {
                 continue;
             }
-            $rel = str_replace('\\', '/', substr($f->getPathname(), strlen($base) + 1));
-            Protocol::post('/sync/media', (string) file_get_contents($f->getPathname()), 'application/octet-stream', ['path' => $rel]);
+            Protocol::post('/sync/media', (string) file_get_contents($base . '/' . $rel), 'application/octet-stream', ['path' => $rel]);
+            Db::exec('INSERT OR REPLACE INTO sync_media (path, mtime, size) VALUES (?, ?, ?)', [$rel, $stat[0], $stat[1]]);
             if (++$n >= 30) {
-                return $n; // the rest next round; media_at stays where it was
+                break; // the rest next round
             }
         }
-        self::setState('media_at', (string) $now);
         return $n;
     }
 

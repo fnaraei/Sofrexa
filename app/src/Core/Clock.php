@@ -46,6 +46,15 @@ final class Clock
         return [$start->getTimestamp() * 1000, $start->modify('+1 day')->getTimestamp() * 1000];
     }
 
+    /**
+     * The first and last business day ('Y-m-d') of a range [from, to): documents that carry a date (expenses, purchase
+     * invoices) belong to a report by these days. The 27th runs until 05:00 on the 28th, but an invoice dated the 28th is not the 27th's.
+     */
+    public static function days(int $from, int $to, int $rollover = 5): array
+    {
+        return [self::day($from, $rollover), self::day(max($from, $to - 1), $rollover)];
+    }
+
     public static function fmt(?int $ms, string $format = 'd.m.Y H:i'): string
     {
         if (!$ms) {

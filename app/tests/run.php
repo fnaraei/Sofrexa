@@ -26,7 +26,12 @@ function same(mixed $expected, mixed $actual, string $what = ''): void
     }
 }
 
+// php bin/sofrexa test Audit — only the files whose name contains "Audit"
+$only = (string) ($GLOBALS['argv'][2] ?? '');
 foreach (glob(__DIR__ . '/*Test.php') ?: [] as $file) {
+    if ($only !== '' && stripos(basename($file), $only) === false) {
+        continue;
+    }
     $tests = require $file;
     foreach ($tests as $name => $fn) {
         $db = $tmp . '/' . bin2hex(random_bytes(4)) . '.sqlite';

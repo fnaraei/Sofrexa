@@ -28,7 +28,7 @@ final class GuestController
             'menu' => QrOrders::menu(),
             'readonly' => !$t || $avail !== 'open',
             'avail' => $avail,
-            'approval' => $t ? QrOrders::needsApproval(QrOrders::session($t['id'])) : false,
+            'approval' => $t ? QrOrders::needsApproval(QrOrders::session($t['id']), QrOrders::device()) : false,
             'mine' => $mine,
         ], self::LAYOUT);
     }
