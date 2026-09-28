@@ -154,3 +154,12 @@ function first_name(?string $name): string
 {
     return $name ? explode(' ', trim($name))[0] : '';
 }
+
+/** Capitals with the Turkish dotted İ when the text is Turkish ("Bahçe" → "BAHÇE", "Izgaralar" → "IZGARALAR", "sipariş" → "SİPARİŞ"). */
+function upper(string $s, ?string $lang = null): string
+{
+    if (($lang ?? I18n::lang()) === 'tr') {
+        $s = strtr($s, ['i' => 'İ', 'ı' => 'I']);
+    }
+    return mb_strtoupper($s, 'UTF-8');
+}

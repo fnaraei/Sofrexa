@@ -50,7 +50,9 @@ final class Orders
     /** Open order of a table (the newest if a bill was split). */
     public static function openForTable(string $tableId): ?array
     {
-        $id = Db::value("SELECT id FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 ORDER BY parent_id IS NOT NULL, opened_at LIMIT 1", [$tableId]);
+        // a guest's QR order waiting for approval is not the table's bill (it opens the approval sheet)
+        $id = Db::value("SELECT id FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 AND NOT (channel = 'qr' AND status = 'pending')
+            ORDER BY parent_id IS NOT NULL, opened_at LIMIT 1", [$tableId]);
         return $id ? self::get($id) : null;
     }
 
@@ -109,7 +111,7 @@ final class Orders
         if (!Db::value('SELECT 1 FROM tables WHERE id = ? AND deleted = 0', [$tableId])) {
             throw new HttpError(404);
         }
-        $open = Db::value("SELECT id FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 ORDER BY opened_at LIMIT 1", [$tableId]);
+        $open = Db::value("SELECT id FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 AND NOT (channel = 'qr' AND status = 'pending') ORDER BY opened_at LIMIT 1", [$tableId]);
         return $open ?: self::create('table', ['table_id' => $tableId, 'guests' => $guests]);
     }
 
@@ -203,11 +205,17 @@ final class Orders
         self::recalc($l['order_id']);
     }
 
-    /** Sends every unsent line to the kitchen/bar (tickets per station). Returns the number of lines sent. */
-    public static function send(string $orderId): int
+    /**
+     * Sends every unsent line to the kitchen/bar (tickets per station). Returns the number of lines sent.
+     * $lineIds: only these lines (a guest's QR order joining a bill that has the waiter's unsent lines).
+     */
+    public static function send(string $orderId, ?array $lineIds = null): int
     {
         $o = self::editable($orderId);
         $new = Db::rows("SELECT * FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId]);
+        if ($lineIds !== null) {
+            $new = array_values(array_filter($new, static fn(array $l): bool => in_array($l['id'], $lineIds, true)));
+        }
         if (!$new) {
             return 0;
         }
@@ -485,6 +493,7 @@ final class Orders
             foreach (Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'served'", [$orderId]) as $l) {
                 \Sofrexa\Core\Sync::touch('order_items', $l['id']);
             }
+            \Sofrexa\Modules\QrOrder\QrOrders::closeSessions(Db::value('SELECT table_id FROM orders WHERE id = ?', [$orderId]));
         }
         \Sofrexa\Modules\Customers\Loyalty::earn($orderId);
     }
@@ -511,6 +520,7 @@ final class Orders
         Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim(($o['note'] ?? '') . ' · iptal: ' . $reason, ' ·')]);
         self::recalc($orderId);
         \Sofrexa\Modules\Customers\Loyalty::refund($orderId);
+        \Sofrexa\Modules\QrOrder\QrOrders::closeSessions($o['table_id']);
         Audit::log('order.void', self::where($o) . ' · ' . Money::fmt((int) $o['total'], false, 'tr') . ' · sebep: ' . $reason, 'order', $orderId);
     }
 

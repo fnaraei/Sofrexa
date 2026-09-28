@@ -44,6 +44,7 @@ final class Settings
         'qr.require_first_approval' => true,
         'qr.call_waiter' => true,
         'qr.request_bill' => true,
+        'qr.eta_minutes' => '15–20',
         'online.enabled' => true,
         'online.delivery' => true,
         'online.pickup' => true,

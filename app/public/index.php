@@ -30,6 +30,12 @@ if (str_starts_with($path, '/media/')) {
     exit;
 }
 
+// A table card that points at this copy (settings qr.base_url): /menu?masa=<code> opens the QR menu of the table.
+if ($path === '/menu' && isset($_GET['masa']) && is_string($_GET['masa']) && preg_match('/^[A-Za-z0-9]{1,16}$/', $_GET['masa'])) {
+    header('Location: /q/' . rawurlencode(strtolower($_GET['masa'])), true, 302);
+    exit;
+}
+
 try {
     if (Migrator::pending()) {
         Migrator::run();

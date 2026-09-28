@@ -161,6 +161,7 @@ final class TablesController
                 Db::softDelete('order_items', $l['id']);
             }
             Orders::recalc($o['id']);
+            \Sofrexa\Modules\QrOrder\QrOrders::closeSessions($o['table_id']);
         }
         Notify::closeFor($o['id']);
         Response::json(['ok' => true, 'message' => I18n::t('close.empty'), 'redirect' => '/tables']);

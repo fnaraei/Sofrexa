@@ -18,7 +18,13 @@ final class Board
     public static function areas(): array
     {
         $open = [];
+        $qr = [];
         foreach (Orders::open(['table', 'qr']) as $o) {
+            // a guest's QR order waiting for approval is not part of the bill yet: the tile asks for approval (W5)
+            if ($o['channel'] === 'qr' && $o['status'] === 'pending') {
+                $qr[$o['table_id']] ??= $o;
+                continue;
+            }
             // a split bill shares the table: show the main one, add the parts' totals
             if (isset($open[$o['table_id']])) {
                 $open[$o['table_id']]['total'] += (int) $o['total'];
@@ -34,8 +40,10 @@ final class Board
             $a['busy'] = 0;
             foreach ($a['tables'] as &$t) {
                 $o = $open[$t['id']] ?? null;
-                $t['order'] = $o;
-                [$t['state'], $t['info'], $t['info_s'], $t['amount']] = self::tile($o, $now);
+                $t['qr'] = $qr[$t['id']] ?? null;
+                $t['order'] = $o ?? $t['qr'];
+                $o = $t['order'];
+                [$t['state'], $t['info'], $t['info_s'], $t['amount']] = self::tile($o, $now, $t['qr']);
                 if ($o) {
                     $a['busy']++;
                 }
@@ -47,15 +55,16 @@ final class Board
     }
 
     /** [state, info text, short info (desktop), amount text] for a table. */
-    public static function tile(?array $o, int $now): array
+    public static function tile(?array $o, int $now, ?array $qr = null): array
     {
+        if ($qr || ($o && $o['status'] === 'pending')) {
+            $q = $qr ?? $o;
+            return ['qr', t('tables.qr_wait'), t('tables.qr_wait_s'), t('tables.items', ['n' => digits((int) $q['line_count'])])];
+        }
         if (!$o) {
             return ['free', t('tables.free'), t('tables.free'), ''];
         }
         $amount = money((int) $o['total']);
-        if ($o['status'] === 'pending') {
-            return ['qr', t('tables.qr_wait'), t('tables.qr_wait_s'), t('tables.items', ['n' => digits((int) $o['line_count'])])];
-        }
         if ($o['bill_at'] || $o['status'] === 'billed') {
             return ['bill', t('tables.bill_asked'), t('tables.bill_asked'), $amount];
         }

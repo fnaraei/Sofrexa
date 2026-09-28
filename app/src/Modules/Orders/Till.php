@@ -68,7 +68,7 @@ final class Till
                 $c['sub_m'] = t('cash.sub_table_m', ['waiter' => $waiter, 't' => dur((int) $o['opened_at'])]);
                 if ($o['status'] === 'pending') {
                     $c += ['badge' => [t('cash.b_pending'), 'attention'], 'border' => 'attention'];
-                    $pay = ['label' => t('cash.btn_approve'), 'style' => 'primary', 'href' => '/tables?t=' . $o['table_id']];
+                    $pay = ['label' => t('cash.btn_approve'), 'style' => 'primary', 'sheet' => '/qr/orders/' . $o['id']];
                 } elseif ($o['bill_at'] || $o['status'] === 'billed') {
                     $c += ['badge' => [t('cash.b_bill'), 'warning'], 'border' => 'warning'];
                     $pay['style'] = 'accent';

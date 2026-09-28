@@ -20,6 +20,12 @@
   document.addEventListener('click', e => {
     const tile = e.target.closest('.ttile[data-table]');
     if (!tile) return;
+    // a guest's QR order waiting: the approval sheet (W5)
+    if (tile.dataset.qr) {
+      e.preventDefault();
+      S.loadSheet('/qr/orders/' + tile.dataset.qr).catch(() => {});
+      return;
+    }
     if (desktop() && tile.hasAttribute('data-select')) {
       e.preventDefault();
       if (tile.classList.contains('is-selected') && tile.dataset.state === 'free') { location.href = '/tables/' + tile.dataset.table + '/order'; return; }

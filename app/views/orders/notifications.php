@@ -39,7 +39,7 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
       $base = '/my/notifications/' . $n['id'];
       $action = match ($n['kind']) {
           'ready' => Ui::btn(t('notif.got'), ['size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
-          'qr' => Ui::btn(t('notif.review'), ['size' => 's', 'href' => $n['ref_id'] ? '/orders/' . $n['ref_id'] : '/tables']),
+          'qr' => $n['ref_id'] ? Ui::btn(t('notif.review'), ['size' => 's', 'attrs' => ['data-load-sheet' => '/qr/orders/' . $n['ref_id']]]) : Ui::btn(t('notif.review'), ['size' => 's', 'href' => '/tables']),
           'bill' => Ui::btn(t('notif.prebill'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/prebill']]),
           'call' => Ui::btn(t('notif.going'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
           default => Ui::btn(t('notif.open'), ['size' => 's', 'attrs' => ['data-post' => $base . '/done']]),

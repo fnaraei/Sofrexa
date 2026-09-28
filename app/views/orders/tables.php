@@ -58,7 +58,7 @@ $aside = '<div class="tpanel" data-table-panel>' . \Sofrexa\Core\View::partial('
     <?= Ui::sync() ?>
   </div>
   <div class="tiles">
-    <?php foreach ($phoneTables as $t): ?><?= OrderUi::tile($t, false, false, ['href' => '/tables/' . $t['id'] . '/order']) ?><?php endforeach ?>
+    <?php foreach ($phoneTables as $t): ?><?= OrderUi::tile($t, false, false, ['href' => '/tables/' . $t['id'] . '/order', 'data-qr' => $t['qr']['id'] ?? null]) ?><?php endforeach ?>
   </div>
 </div>
 
@@ -67,7 +67,7 @@ $aside = '<div class="tpanel" data-table-panel>' . \Sofrexa\Core\View::partial('
     <section class="tarea">
       <div class="tarea__head"><?= icon($a['icon'], 20) ?><h2 class="t-heading-m"><?= e(tn(json_arr($a['names']) ?: $a['name'])) ?></h2><span class="t-body-s c-muted"><?= e(t('tables.area_count', ['n' => digits(count($a['tables'])), 'busy' => digits($a['busy'])])) ?></span></div>
       <div class="tiles tiles--desk">
-        <?php foreach ($a['tables'] as $t): ?><?= OrderUi::tile($t, true, $selected && $selected['id'] === $t['id'], ['href' => '/tables?t=' . $t['id'], 'data-select' => true]) ?><?php endforeach ?>
+        <?php foreach ($a['tables'] as $t): ?><?= OrderUi::tile($t, true, $selected && $selected['id'] === $t['id'], ['href' => '/tables?t=' . $t['id'], 'data-select' => true, 'data-qr' => $t['qr']['id'] ?? null]) ?><?php endforeach ?>
       </div>
     </section>
   <?php endforeach ?>

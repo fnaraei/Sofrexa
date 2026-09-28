@@ -110,8 +110,11 @@ final class Db
     public static function save(string $table, array $row): string
     {
         $row['id'] ??= Uuid::v7();
-        $row['updated_at'] = Clock::ms();
-        $exists = (bool) self::value('SELECT 1 FROM ' . self::ident($table) . ' WHERE id = ?', [$row['id']]);
+        // Last write wins between the PC and the web copy: an edit must beat the version it replaces,
+        // even when this machine's clock runs a little behind the one that wrote that version.
+        $current = self::value('SELECT updated_at FROM ' . self::ident($table) . ' WHERE id = ?', [$row['id']]);
+        $exists = $current !== null;
+        $row['updated_at'] = max(Clock::ms(), (int) $current + 1);
         if ($exists) {
             $id = $row['id'];
             unset($row['id']);
@@ -127,7 +130,8 @@ final class Db
     /** Soft delete of a synced record (kept for history and sync). */
     public static function softDelete(string $table, string $id): void
     {
-        self::update($table, ['deleted' => 1, 'updated_at' => Clock::ms()], 'id = ?', [$id]);
+        $current = (int) self::value('SELECT updated_at FROM ' . self::ident($table) . ' WHERE id = ?', [$id]);
+        self::update($table, ['deleted' => 1, 'updated_at' => max(Clock::ms(), $current + 1)], 'id = ?', [$id]);
         Sync::touch($table, $id);
     }
 
