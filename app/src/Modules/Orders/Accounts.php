@@ -34,6 +34,16 @@ final class Accounts
     }
 
     /**
+     * A bill paid on account came to less in the end (a dish cancelled): the difference comes off the debt it put on the
+     * account — no money leaves the drawer, because none came in. The statement shows it as its own line.
+     */
+    public static function refund(string $customerId, int $amount, string $orderId, string $note): void
+    {
+        Db::append('account_ledger', ['customer_id' => $customerId, 'amount' => -$amount, 'kind' => 'refund', 'order_id' => $orderId,
+            'note' => mb_substr($note, 0, 200), 'at' => Clock::ms(), 'user_id' => Auth::user()['id'] ?? null]);
+    }
+
+    /**
      * The customer pays off debt (CU4 "Tahsil et"): cash and card go through the open shift (the drawer / the POS),
      * a bank transfer does not. Returns the new balance.
      */

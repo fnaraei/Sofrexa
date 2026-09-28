@@ -48,8 +48,10 @@ final class CashierController
             'nav' => 'cashier',
             'o' => $o,
             'due' => $due,
-            // C2c / C3c: the bill came down below what was already paid — the screen offers the refund instead
+            // C2c / C3c: the bill came down below what was already paid — the screen offers the refund instead;
+            // C2d / C3d: the part paid on account comes off the account (decision 47)
             'over' => max(0, (int) $o['paid'] - (int) $o['total']),
+            'plan' => Orders::refundPlan($o),
             'share' => min($share, $due),
             'persons' => $persons,
             'done' => $done,
@@ -122,9 +124,10 @@ final class CashierController
     public function refund(Request $req): void
     {
         $o = Orders::editable($req->param('id'));
+        $plan = Orders::refundPlan($o);
         $amount = Orders::refund($o['id'], $req->str('method'), $req->bool('receipt'));
         Notify::closeFor($o['id']);
-        Flash::set('success', I18n::t('pay.over_done', ['amount' => money($amount)]));
+        Flash::set('success', $plan['money'] > 0 ? I18n::t('pay.over_done', ['amount' => money($amount)]) : I18n::t('pay.over_done_acc', ['amount' => money($amount)]));
         Response::json(['ok' => true, 'redirect' => '/cashier']);
     }
 

@@ -1806,6 +1806,8 @@ a.strow:hover { background: var(--bg-surface-2); }
 .payover { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--radius-lg); background: var(--bg-surface-2); }
 .payover__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .payover__row--back { padding-top: 12px; border-top: 1px solid var(--border-default); }
+/* C2d / C3d: the new account balance, under the summary, when the difference comes off the customer's account */
+.payover__bal { display: flex; align-items: center; gap: 8px; }
 @media (min-width: 1024px) {
   #payover .paymethods { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 }

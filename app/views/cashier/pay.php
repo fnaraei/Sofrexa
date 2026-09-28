@@ -65,14 +65,25 @@ foreach ($currencies as $c) {
 $loyTier = $customer ? \Sofrexa\Modules\Customers\Loyalty::tierOf($customer['id']) : null;
 $loyPoints = $customer ? \Sofrexa\Modules\Customers\Loyalty::balance($customer['id']) : 0;
 $loyUsed = \Sofrexa\Modules\Customers\Loyalty::used($o['id']);
+// C2d / C3d: what was paid on account comes off the account; only the rest is paid out (and asks how)
+$plan ??= ['account' => [], 'money' => $over];
+$offAccount = array_sum($plan['account']);
+$payOut = (int) $plan['money'];
+$goLabel = $payOut > 0 ? t('pay.over_go') : t('pay.over_go_acc');
+$goIcon = $payOut > 0 ? 'undo' : 'wallet';
 $bottom = $over > 0
-    ? Ui::btn(t('pay.over_go'), ['type' => 'submit', 'style' => 'accent', 'size' => 'l', 'icon' => 'undo', 'attrs' => ['form' => 'payover', 'disabled' => !$shift]])
+    ? Ui::btn($goLabel, ['type' => 'submit', 'style' => 'accent', 'size' => 'l', 'icon' => $goIcon, 'attrs' => ['form' => 'payover', 'disabled' => !$shift]])
     : Ui::btn(t('pay.complete'), ['style' => 'accent', 'size' => 'l', 'icon' => 'check', 'attrs' => ['data-pay-submit' => true, 'disabled' => !$shift]]);
 $paidBy = [];
 foreach ($o['payments'] as $p) {
     $paidBy[$p['method']] = ($paidBy[$p['method']] ?? 0) + (int) $p['amount'];
 }
 $paidText = implode(' · ', array_map(static fn(string $m, int $a): string => t('pay.m_' . $m) . ' ' . money($a), array_keys($paidBy), $paidBy));
+$accountId = array_key_first($plan['account']);
+$accountName = $accountId !== null ? (string) \Sofrexa\Core\Db::value('SELECT name FROM customers WHERE id = ?', [$accountId]) : '';
+if ($accountName !== '') {
+    $paidText .= ' · ' . $accountName;
+}
 ?>
 <?php if (!$shift): ?>
   <div class="banner banner--warning" role="status"><?= icon('lock', 20) ?><div class="col grow" style="gap:2px"><div class="banner__title"><?= e(t('cash.no_shift_t')) ?></div><div class="banner__text"><?= e(t('cash.no_shift')) ?></div></div>
@@ -97,22 +108,30 @@ $paidText = implode(' · ', array_map(static fn(string $m, int $a): string => t(
   <form class="pay__panel" id="payover" method="post" action="/cashier/pay/<?= e($o['id']) ?>/refund" data-ajax>
     <?= csrf_field() ?>
     <h2 class="t-heading-l only-desktop"><?= e(t('pay.title')) ?></h2>
-    <?= Ui::banner(t('pay.over_t', ['amount' => money($over)]), t('pay.over', ['total' => money((int) $o['total']), 'paid' => money((int) $o['paid'])]), 'warning', 'alert') ?>
+    <?= $payOut > 0
+        ? Ui::banner(t('pay.over_t', ['amount' => money($over)]), t('pay.over', ['total' => money((int) $o['total']), 'paid' => money((int) $o['paid'])]), 'warning', 'alert')
+        : Ui::banner(t('pay.over_t', ['amount' => money($over)]), t('pay.over_acc'), 'info', 'info') ?>
     <div class="payover">
       <div class="payover__row"><span class="t-body-m c-secondary"><?= e(t('pay.over_bill')) ?></span><span class="t-heading-m num"><?= e(money((int) $o['total'])) ?></span></div>
       <div class="payover__row"><span class="col" style="gap:0"><span class="t-body-m c-secondary"><?= e(t('pay.over_paid')) ?></span><?php if ($paidText !== ''): ?><span class="t-body-s c-muted"><?= e($paidText) ?></span><?php endif ?></span><span class="t-heading-m num"><?= e(money((int) $o['paid'])) ?></span></div>
-      <div class="payover__row payover__row--back"><span class="t-heading-m"><?= e(t('pay.over_back')) ?></span><span class="t-number-l num c-warning"><?= e(money($over)) ?></span></div>
+      <?php if ($offAccount > 0): ?><div class="payover__row payover__row--back"><span class="t-heading-m"><?= e(t('pay.over_back_acc')) ?></span><span class="t-number-l num c-info"><?= e(money($offAccount)) ?></span></div><?php endif ?>
+      <?php if ($payOut > 0): ?><div class="payover__row<?= $offAccount > 0 ? '' : ' payover__row--back' ?>"><span class="t-heading-m"><?= e(t('pay.over_back')) ?></span><span class="t-number-l num c-warning"><?= e(money($payOut)) ?></span></div><?php endif ?>
     </div>
+    <?php if ($accountId !== null): ?>
+      <div class="payover__bal t-body-s c-secondary"><?= icon('wallet', 16) ?><span><?= e(t('pay.over_balance', ['amount' => money(\Sofrexa\Modules\Orders\Accounts::balance($accountId) - $offAccount)])) ?></span></div>
+    <?php endif ?>
+    <?php if ($payOut > 0): ?>
     <div class="col gap-8">
       <span class="overline"><?= e(t('pay.over_method')) ?></span>
       <div class="paymethods">
-        <?= $opt('cash', 'cash', t('pay.over_cash'), t('pay.over_cash_s', ['amount' => money($over)]), t('pay.over_cash_s', ['amount' => money($over)]), true) ?>
+        <?= $opt('cash', 'cash', t('pay.over_cash'), t('pay.over_cash_s', ['amount' => money($payOut)]), t('pay.over_cash_s', ['amount' => money($payOut)]), true) ?>
         <?= $opt('card', 'credit-card', t('pay.over_card'), t('pay.over_card_s'), t('pay.over_card_s'), false) ?>
       </div>
     </div>
+    <?php endif ?>
     <div class="grow only-desktop"></div>
     <label class="row gap-10 only-desktop t-body-m c-secondary"><?= Ui::checkbox('receipt', true) ?><?= e(t('pay.over_print')) ?></label>
-    <?= Ui::btn(t('pay.over_go'), ['type' => 'submit', 'style' => 'accent', 'size' => 'l', 'block' => true, 'icon' => 'undo', 'class' => 'only-desktop', 'attrs' => ['disabled' => !$shift]]) ?>
+    <?= Ui::btn($goLabel, ['type' => 'submit', 'style' => 'accent', 'size' => 'l', 'block' => true, 'icon' => $goIcon, 'class' => 'only-desktop', 'attrs' => ['disabled' => !$shift]]) ?>
   </form>
   <?php else: ?>
   <form class="pay__panel" method="post" action="/cashier/pay/<?= e($o['id']) ?>" data-pay-form data-pay='<?= e(json_encode($cfg, JSON_UNESCAPED_UNICODE)) ?>'>

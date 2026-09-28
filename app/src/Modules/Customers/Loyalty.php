@@ -433,6 +433,44 @@ final class Loyalty
     }
 
     /**
+     * When a bill closes: points used on it beyond what the bill could take off (it shrank after they were used — a dish
+     * cancelled) go back to the customer, at the value they were used at, and the point discount is cut to what it really
+     * gave. Points come first on a bill (Orders::effective), so what they took off is the smaller of their value and the
+     * bill. A customer keeps a part point (they are given back rounded down, used rounded up).
+     */
+    public static function settle(string $orderId): void
+    {
+        $used = self::used($orderId);
+        if ($used <= 0) {
+            return;
+        }
+        $value = 0;
+        foreach (self::activeDiscounts($orderId) as $d) {
+            $value += $d['reason'] === 'puan' ? (int) $d['amount'] : 0;
+        }
+        $sub = (int) Db::value('SELECT subtotal FROM orders WHERE id = ?', [$orderId]);
+        $took = min($value, max(0, $sub));
+        if ($value <= 0 || $took >= $value) {
+            return;
+        }
+        $keep = (int) ceil($used * $took / $value);
+        $uid = Auth::user()['id'] ?? null;
+        $back = $used - $keep;
+        foreach (Db::rows("SELECT customer_id, -SUM(points) AS p FROM loyalty_ledger WHERE order_id = ? AND kind IN ('redeem', 'refund')
+            GROUP BY customer_id HAVING -SUM(points) > 0 ORDER BY customer_id", [$orderId]) as $r) {
+            if ($back <= 0) {
+                break;
+            }
+            $give = min($back, (int) $r['p']);
+            Db::append('loyalty_ledger', ['customer_id' => $r['customer_id'], 'points' => $give, 'kind' => 'refund', 'order_id' => $orderId,
+                'note' => 'kullanılmayan', 'at' => Clock::ms(), 'user_id' => $uid]);
+            $back -= $give;
+        }
+        self::rebuild($orderId, static fn(array $d): bool => $d['reason'] !== 'puan',
+            [['kind' => 'amount', 'value' => $took, 'amount' => $took, 'reason' => 'puan']]);
+    }
+
+    /**
      * A bill that used points is merged into another: its point discount now sits on that bill, so the points go with
      * it — given back on the first bill and used on the second, the balance untouched. Taking the discount off the
      * merged bill (or cancelling it) then gives them back to the customer exactly once.

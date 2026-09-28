@@ -341,6 +341,9 @@ final class Orders
         Audit::log('order.void_item', self::where($o) . ' · ' . $l['name'] . ' ×' . self::qtyText($qty) . ' · ' . Money::fmt($amount, false, 'tr') . ' · sebep: ' . $reason
             . ($stock === 'waste' ? ' · hazırdı: zayi' : ''), 'order', $o['id'], ['line' => $l['id']]);
         Tickets::void($o['id'], $l['id'], $qty, $reason);
+        if ($l['status'] === 'ready') {
+            \Sofrexa\Modules\Kitchen\Kitchen::retell($o['id']); // a cancelled plate is not carried out
+        }
         if ($stock === 'pending') {
             self::askKitchen($o, $voidId);
         }
@@ -554,6 +557,9 @@ final class Orders
             self::recalc($fromId);
         });
         self::recalc($intoId);
+        // plates waiting at the pass moved with their lines: their alert moves to the bill they are on now
+        \Sofrexa\Modules\Kitchen\Kitchen::retell($fromId);
+        \Sofrexa\Modules\Kitchen\Kitchen::retell($intoId);
         Audit::log('order.merge', self::where($from) . ' → ' . self::where($into), 'order', $intoId);
     }
 
@@ -628,6 +634,8 @@ final class Orders
             self::recalc($new);
             return $new;
         });
+        \Sofrexa\Modules\Kitchen\Kitchen::retell($orderId);
+        \Sofrexa\Modules\Kitchen\Kitchen::retell($new);
         Audit::log('order.split', self::where($o) . ' · ' . count($lines) . ' ürün ayrı hesaba', 'order', $new);
         return $new;
     }
@@ -765,8 +773,11 @@ final class Orders
 
     /**
      * The bill now comes to less than was already paid (a dish cancelled after part of it was paid): the difference goes
-     * back to the guest — from the drawer ('cash') or reversed on the card machine ('card') — as a payment of minus that
-     * much, and the bill closes. Like any payment it belongs to the shift that makes it. Returns the amount given back.
+     * back and the bill closes (decision 46). What was put on the customer's account comes off that account first — it
+     * was never money in the drawer (decision 47) — and only the rest is paid out, from the drawer ('cash') or reversed
+     * on the card machine ('card', never more than was taken on the card). Each part is a payment of minus that much in
+     * the shift that makes it. A dish added and not sent yet goes to the kitchen first, as when a payment closes a bill.
+     * Returns the amount taken off the bill's payments.
      */
     public static function refund(string $orderId, string $method, bool $receipt = true): int
     {
@@ -778,30 +789,70 @@ final class Orders
         if (!$shift) {
             throw new \InvalidArgumentException(I18n::t('order.err_no_shift'));
         }
+        if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId])) {
+            self::send($orderId);
+        }
         $u = Auth::user();
-        [$o, $over] = Db::tx(static function () use ($orderId, $method, $shift, $u): array {
+        [$o, $plan] = Db::tx(static function () use ($orderId, $method, $shift, $u): array {
             $o = self::get($orderId);
             if (!in_array($o['status'], self::OPEN, true)) {
                 throw new \InvalidArgumentException(I18n::t('order.err_closed'));
             }
-            $over = (int) $o['paid'] - (int) $o['total'];
-            if ($over <= 0) {
+            $plan = self::refundPlan($o);
+            if ($plan['over'] <= 0) {
                 throw new \InvalidArgumentException(I18n::t('pay.err_no_refund'));
             }
-            Db::append('payments', ['order_id' => $orderId, 'shift_id' => $shift, 'method' => $method, 'currency' => 'TRY', 'amount_fx' => 0, 'rate' => 1,
-                'amount' => -$over, 'change_given' => 0, 'customer_id' => $o['customer_id'], 'at' => Clock::ms(), 'user_id' => $u['id'] ?? null, 'courier_id' => null]);
+            if ($plan['money'] > 0 && $method === 'card' && $plan['money'] > $plan['card']) {
+                throw new \InvalidArgumentException(I18n::t('pay.err_card_refund', ['amount' => Money::fmt($plan['card'])]));
+            }
+            $row = ['order_id' => $orderId, 'shift_id' => $shift, 'currency' => 'TRY', 'amount_fx' => 0, 'rate' => 1, 'change_given' => 0,
+                'at' => Clock::ms(), 'user_id' => $u['id'] ?? null, 'courier_id' => null];
+            foreach ($plan['account'] as $customerId => $amount) {
+                Db::append('payments', ['method' => 'account', 'amount' => -$amount, 'customer_id' => (string) $customerId] + $row);
+                Accounts::refund((string) $customerId, $amount, $orderId, self::where($o) . ' · fazla ödeme iadesi');
+            }
+            if ($plan['money'] > 0) {
+                Db::append('payments', ['method' => $method, 'amount' => -$plan['money'], 'customer_id' => $o['customer_id']] + $row);
+            }
             self::recalc($orderId);
             self::close($orderId);
-            return [$o, $over];
+            return [$o, $plan];
         });
-        if ($method === 'cash') {
+        if ($plan['money'] > 0 && $method === 'cash') {
             Tickets::drawer();
         }
         if ($receipt) {
             Tickets::receipt($orderId);
         }
-        Audit::log('order.refund', self::where($o) . ' · ' . Money::fmt($over, false, 'tr') . ' iade · ' . ($method === 'card' ? 'kart' : 'nakit'), 'order', $orderId);
-        return $over;
+        $account = array_sum($plan['account']);
+        Audit::log('order.refund', self::where($o) . ' · ' . Money::fmt($plan['over'], false, 'tr') . ' iade'
+            . ($plan['money'] > 0 ? ' · ' . Money::fmt($plan['money'], false, 'tr') . ' ' . ($method === 'card' ? 'kart' : 'nakit') : '')
+            . ($account > 0 ? ' · ' . Money::fmt($account, false, 'tr') . ' cari borçtan düşüldü' : ''), 'order', $orderId);
+        return $plan['over'];
+    }
+
+    /**
+     * How an overpaid bill's difference goes back: 'account' — per customer, the part that comes off what was put on
+     * their account (the newest account payments first); 'money' — the rest, paid out in cash or on the card; 'card' —
+     * how much was taken on the card, the most a card reversal may give back.
+     * @return array{over:int, account:array<string,int>, money:int, card:int}
+     */
+    public static function refundPlan(array $o): array
+    {
+        $over = max(0, (int) $o['paid'] - (int) $o['total']);
+        $left = $over;
+        $account = [];
+        foreach (Db::rows("SELECT customer_id, SUM(amount) AS amount, MAX(at) AS last FROM payments WHERE order_id = ? AND method = 'account'
+            GROUP BY customer_id HAVING SUM(amount) > 0 ORDER BY last DESC", [$o['id']]) as $r) {
+            if ($left <= 0) {
+                break;
+            }
+            $take = min($left, (int) $r['amount']);
+            $account[(string) $r['customer_id']] = $take;
+            $left -= $take;
+        }
+        $card = (int) Db::value("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE order_id = ? AND method = 'card'", [$o['id']]);
+        return ['over' => $over, 'account' => $account, 'money' => $left, 'card' => max(0, $card)];
     }
 
     /** The payment itself, inside pay()'s transaction. */
@@ -910,6 +961,7 @@ final class Orders
             }
             \Sofrexa\Modules\QrOrder\QrOrders::closeSessions(Db::value('SELECT table_id FROM orders WHERE id = ?', [$orderId]));
         }
+        \Sofrexa\Modules\Customers\Loyalty::settle($orderId);
         \Sofrexa\Modules\Customers\Loyalty::earn($orderId);
     }
 

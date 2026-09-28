@@ -256,7 +256,8 @@ final class QrOrders
     {
         $o = Orders::get($orderId);
         $main = self::mainOrder($o['table_id'], $orderId);
-        $waiter = $main['waiter_id'] ?? Assign::toWaiter($orderId);
+        // the table's waiter while on shift; otherwise shared out like a table nobody owns
+        $waiter = Notify::recipient($main['waiter_id'] ?? null) ?? Assign::toWaiter($orderId);
         $lines = array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'void');
         Notify::push('qr', ['where' => Orders::where($o), 'what' => I18n::t('qr.n_items', ['n' => count($lines)], 'tr') . ' · ' . \Sofrexa\Core\Money::fmt((int) $o['total'], false, 'tr')],
             $waiter, 'waiter', $orderId);
@@ -362,7 +363,7 @@ final class QrOrders
         }
         $main = self::mainOrder($table['id']);
         $where = 'Masa ' . $table['number'];
-        Notify::push('call', ['where' => $where, 'qr' => true], $main['waiter_id'] ?? null, 'waiter', $main['id'] ?? null);
+        Notify::push('call', ['where' => $where, 'qr' => true], Notify::recipient($main['waiter_id'] ?? null), 'waiter', $main['id'] ?? null);
         return true;
     }
 

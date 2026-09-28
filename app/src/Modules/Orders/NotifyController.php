@@ -71,10 +71,13 @@ final class NotifyController
                     // "Aldım": the plates on the screen left the kitchen — only those; one that arrived since keeps ringing
                     self::till('orders.take');
                     $seen = $req->input('lines');
-                    $took = Notify::collect($n, is_array($seen) ? $seen : null);
-                    if ($took) {
-                        \Sofrexa\Modules\Kitchen\Kitchen::served($n['ref_id'], $took);
-                    }
+                    // one step under the lock: the alert read again, the plates handed over, the rest kept on it
+                    Db::tx(static function () use ($n, $seen): void {
+                        $took = Notify::collect($n, is_array($seen) ? $seen : null);
+                        if ($took) {
+                            \Sofrexa\Modules\Kitchen\Kitchen::served($n['ref_id'], $took);
+                        }
+                    });
                     break;
                 }
                 Notify::done($n['id']);

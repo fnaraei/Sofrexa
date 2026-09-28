@@ -88,18 +88,53 @@ final class Notify
      */
     public static function collect(array $n, ?array $seen): array
     {
-        $b = json_arr($n['body']);
-        $all = array_map('strval', (array) ($b['lines'] ?? []));
-        $took = $seen === null ? $all : array_values(array_intersect($all, array_map('strval', $seen)));
-        $left = array_values(array_diff($all, $took));
-        if (!$left) {
-            self::done($n['id']);
+        return Db::tx(static function () use ($n, $seen): array {
+            // read the alert again inside the lock: a plate the kitchen put on it since the caller read it must stay
+            $n = Db::row('SELECT * FROM notifications WHERE id = ? AND deleted = 0', [$n['id']]);
+            if (!$n || $n['done_at']) {
+                return [];
+            }
+            $b = json_arr($n['body']);
+            $all = array_map('strval', (array) ($b['lines'] ?? []));
+            $took = $seen === null ? $all : array_values(array_intersect($all, array_map('strval', $seen)));
+            $left = array_values(array_diff($all, $took));
+            if (!$left) {
+                self::done($n['id']);
+                return $took;
+            }
+            self::saveLines($n['id'], $b, $left, null);
             return $took;
+        });
+    }
+
+    /**
+     * Trims the open ready alert of an order to the plates of $lines it still lists (a plate taken back by the kitchen,
+     * or moved to another bill, leaves it; one left with nothing is closed). It does not ring again for that. Returns
+     * the plates the alert still lists.
+     */
+    public static function keepLines(string $orderId, array $lines): array
+    {
+        $n = Db::row("SELECT * FROM notifications WHERE ref_type = 'order' AND ref_id = ? AND kind = 'ready' AND done_at IS NULL AND deleted = 0", [$orderId]);
+        if (!$n) {
+            return [];
         }
-        $b['lines'] = $left;
-        $b['items'] = array_values(array_filter((array) ($b['items'] ?? []), static fn($i): bool => is_array($i) && in_array((string) ($i['id'] ?? ''), $left, true)));
-        Db::save('notifications', ['id' => $n['id'], 'body' => self::describe($b), 'read_at' => null]);
-        return $took;
+        $b = json_arr($n['body']);
+        $had = array_map('strval', (array) ($b['lines'] ?? []));
+        $keep = array_values(array_intersect($had, array_map('strval', $lines)));
+        if (!$keep) {
+            self::done($n['id']);
+        } elseif ($keep !== $had) {
+            self::saveLines($n['id'], $b, $keep, $n['read_at']);
+        }
+        return $keep;
+    }
+
+    /** A ready alert's body cut down to $lines (with their plate rows); $readAt null makes it ring again. */
+    private static function saveLines(string $id, array $b, array $lines, int|string|null $readAt): void
+    {
+        $b['lines'] = $lines;
+        $b['items'] = array_values(array_filter((array) ($b['items'] ?? []), static fn($i): bool => is_array($i) && in_array((string) ($i['id'] ?? ''), $lines, true)));
+        Db::save('notifications', ['id' => $id, 'body' => self::describe($b), 'read_at' => $readAt]);
     }
 
     /**
@@ -108,6 +143,7 @@ final class Notify
      */
     public static function follow(string $orderId, ?string $userId): void
     {
+        $userId = self::recipient($userId);
         foreach (Db::rows("SELECT id FROM notifications WHERE ref_type = 'order' AND ref_id = ? AND done_at IS NULL AND deleted = 0
             AND kind IN ('ready', 'qr', 'bill', 'call', 'served')", [$orderId]) as $n) {
             Db::save('notifications', ['id' => $n['id'], 'user_id' => $userId, 'role' => $userId ? null : 'waiter', 'read_at' => null]);
@@ -125,11 +161,20 @@ final class Notify
         }
     }
 
-    /** The table's waiter, or every waiter when nobody owns the table. */
+    /** The table's waiter, or every waiter when nobody owns the table or its waiter has gone home. */
     public static function toWaiter(string $kind, array $order, array $params = []): string
     {
         $params += ['where' => Orders::where($order)];
-        return self::push($kind, $params, $order['waiter_id'] ?? null, 'waiter', $order['id']);
+        return self::push($kind, $params, self::recipient($order['waiter_id'] ?? null), 'waiter', $order['id']);
+    }
+
+    /**
+     * Who hears an alert for a table: its waiter while on shift. One who has clocked out is not called back — the alert
+     * goes to every waiter, and the bill keeps its waiter (their sales stay theirs).
+     */
+    public static function recipient(?string $waiterId): ?string
+    {
+        return $waiterId && !\Sofrexa\Modules\Staff\Staff::offShift($waiterId) ? $waiterId : null;
     }
 
     public static function forMe(int $limit = 50): array
@@ -144,6 +189,10 @@ final class Notify
      */
     public static function alerts(int $limit = 5): array
     {
+        // someone who has clocked out is not rung for anything, not even for alerts every waiter hears
+        if (\Sofrexa\Modules\Staff\Staff::offShift((string) (Auth::user()['id'] ?? ''))) {
+            return [];
+        }
         [$where, $p] = self::mine();
         // a guest order to approve rings only for someone who may approve it
         $kinds = Auth::can('orders.qr_approve') ? self::ALERT_KINDS : array_values(array_diff(self::ALERT_KINDS, ['qr']));

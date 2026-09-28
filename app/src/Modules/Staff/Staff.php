@@ -34,6 +34,15 @@ final class Staff
         return $last && $last['kind'] === 'in' ? $last : null;
     }
 
+    /**
+     * Whether someone has clocked out and not back in (their last entry is "out"). A restaurant that does not use the
+     * clock at all has no entries, and then nobody counts as gone.
+     */
+    public static function offShift(string $userId): bool
+    {
+        return Db::value('SELECT kind FROM time_entries WHERE user_id = ? ORDER BY at DESC, rowid DESC LIMIT 1', [$userId]) === 'out';
+    }
+
     public static function clockIn(string $userId): int
     {
         $open = self::openEntry($userId);

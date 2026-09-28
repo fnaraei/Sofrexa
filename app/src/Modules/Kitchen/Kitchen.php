@@ -179,10 +179,32 @@ final class Kitchen
             Db::save('order_items', ['id' => $l['id'], 'status' => 'sent', 'ready_at' => null]);
         }
         if ($lines) {
-            Notify::closeFor($orderId, 'ready');
+            // only these plates leave the alert: another round still waiting at the pass keeps ringing
+            self::retell($orderId);
             Audit::log('kitchen.recall', Orders::where(Orders::get($orderId)) . ' · ' . count($lines) . ' ürün geri alındı', 'order', $orderId);
         }
         return count($lines);
+    }
+
+    /**
+     * The ready alert of an order made to match the plates really waiting for it: after the kitchen took some back, or a
+     * split or a merge moved plates to another bill. Plates no longer ready here leave its alert (which closes when
+     * empty, without ringing again); ready plates it does not list yet — ones that came over from another bill — are
+     * put on it, and for those it rings. So a plate at the pass always has one alert, on the bill it belongs to.
+     */
+    public static function retell(string $orderId): void
+    {
+        $ready = Db::rows("SELECT id, round, station FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0", [$orderId]);
+        $listed = Notify::keepLines($orderId, array_column($ready, 'id'));
+        $groups = [];
+        foreach ($ready as $l) {
+            if (!in_array((string) $l['id'], $listed, true)) {
+                $groups[$l['round'] . '|' . $l['station']] = [(int) $l['round'], (string) $l['station']];
+            }
+        }
+        foreach ($groups as [$round, $station]) {
+            self::tell($orderId, $round, $station);
+        }
     }
 
     /** The waiter took the plates ("Aldım"): ready lines become served and leave the screens. */
