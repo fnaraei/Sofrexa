@@ -4,6 +4,7 @@
  * Page variables: $title, $sub, $back, $nav, $tab, $appActions[], $headActions, $bottom, $theme,
  * $scripts[], $noTabbar, $noHead, $bodyClass, $appSub (phone subtitle when it differs from the desktop one),
  * $aside / $asideStart: full-height desktop panels after / before the main column (W10 order panel, C4 customer panel).
+ * $topBanner: a banner above the page head on desktop and under the AppBar on phones (C1b / C8b).
  */
 use Sofrexa\Core\I18n;
 use Sofrexa\Core\Settings;
@@ -57,6 +58,7 @@ $lang = I18n::lang();
       <div class="appbar__titles"><div class="appbar__title"><?= e($appTitle) ?></div><?php if ($appSub !== ''): ?><div class="appbar__sub"><?= e($appSub) ?></div><?php endif ?></div>
       <?php foreach ($appActions as $a) echo $a; ?>
     </header>
+    <?php if (!empty($topBanner)): ?><div class="topbanner"><?= $topBanner ?></div><?php endif ?>
     <?php if (empty($noHead)): ?><?= Ui::pageHead($title ?? '', $sub, $headActions) ?><?php endif ?>
     <?php if (\Sofrexa\Sync\Emergency::on()): ?><div class="emgbar"><?= Ui::banner(t('emg.banner_t'), t('emg.banner'), 'warning', 'alert') ?></div><?php endif ?>
     <?php foreach (\Sofrexa\Core\Flash::take() as [$type, $msg]): ?><?= Ui::banner($msg, '', $type === 'error' ? 'danger' : 'success', $type === 'error' ? 'alert' : 'check-circle') ?><?php endforeach ?>

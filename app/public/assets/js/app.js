@@ -147,14 +147,15 @@
     if (btn) btn.classList.add('is-busy');
     try {
       const res = await S.api(form.action, new FormData(form));
-      form.dispatchEvent(new CustomEvent('ajax:done', { detail: res }));
+      // bubbles: the page-wide listener below reloads when the server answers { reload: true }
+      form.dispatchEvent(new CustomEvent('ajax:done', { detail: res, bubbles: true }));
       if (res.message) S.toast(res.message);
       else if (!res.redirect && form.dataset.toast !== 'off') S.toast(S.tr('js.saved'));
       if (res.redirect) location.href = res.redirect;
       else if (form.hasAttribute('data-reload')) setTimeout(() => location.reload(), 350);
       else if (form.closest('.scrim') && !form.hasAttribute('data-keep-open')) S.closeSheet(form.closest('.scrim'));
     } catch (err) {
-      form.dispatchEvent(new CustomEvent('ajax:fail', { detail: err }));
+      form.dispatchEvent(new CustomEvent('ajax:fail', { detail: err, bubbles: true }));
     } finally {
       if (btn) btn.classList.remove('is-busy');
     }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Sofrexa\Modules\Orders\CashierController as C;
+use Sofrexa\Modules\Orders\VoidsController as V;
 
 $p = ['perm' => 'cash.pay'];
 $router->get('/cashier', [C::class, 'index'], $p);
@@ -14,6 +15,13 @@ $router->post('/cashier/pay/{id}/note', [C::class, 'note'], $p);
 $router->post('/cashier/pay/{id}/customer', [C::class, 'customer'], $p);
 $router->post('/cashier/pay/{id}/points', [C::class, 'points'], $p);
 $router->get('/cashier/customers', [C::class, 'customers'], $p);
+
+// cancelled dishes of the kitchen (IP1–IP4): the till's answer, waste, another bill, a staff member
+$router->get('/cashier/voids', [V::class, 'index'], $p);
+$router->get('/cashier/voids/{id}/sheet/{kind}', [V::class, 'sheet'], $p);
+$router->post('/cashier/voids/{id}/settle', [V::class, 'settle'], $p);
+$router->post('/cashier/voids/{id}/reuse', [V::class, 'reuse'], $p);
+$router->post('/cashier/voids/{id}/staff', [V::class, 'staff'], $p);
 
 $router->get('/cashier/rates', [C::class, 'rates'], ['perm' => 'cash.rates']);
 $router->post('/cashier/rates', [C::class, 'saveRates'], ['perm' => 'cash.rates']);

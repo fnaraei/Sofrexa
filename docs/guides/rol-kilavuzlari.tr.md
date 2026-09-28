@@ -43,6 +43,18 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 
 **Kasa hareketleri:** para girişi / çıkışı sebebiyle kaydedilir, silinmez; yanlış kayıt **Ters kayıt** ile düzeltilir. Satışsız çekmece açma da kayda geçer.
 
+**İptal edilen yemek (Hazır iptaller):** mutfağa gitmiş bir yemek aşçı "hazır" demeden iptal edilirse "… iptal edildi · mutfağa sorun" bildirimi gelir. Mutfağa sorun:
+- Henüz hazırlanmadıysa → **Hazırlanmadı · stoka dön** (malzemeler stoka döner)
+- Hazırlandıysa → **Hazırlandı · zayi**
+
+"Hazır"dan sonra yapılan iptal kendiliğinden zayi olur. **Kasa → Hazır iptaller** sayfasında zayi yemek:
+- **Masaya ver:** aynı yemeği isteyen açık hesaba eklenir (mutfağa yeni fiş gitmez; o masanın garsonu "hazır" bildirimi alır).
+- **Personele yaz:** isteyen personelin hesabına yazılır (maaşından düşülür).
+
+**₺0 hesap:** indirim ya da puanla sıfırlanan hesap aynı **Ödemeyi tamamla** düğmesiyle kapanır.
+
+**Yazıcı:** bir yazıcı birkaç kez basamazsa "… yazıcısı yazdırmıyor" bildirimi gelir. Fişler kaybolmaz, yazıcı açılınca kendiliğinden basılır; **Şimdi dene** hemen tekrar dener.
+
 **Cari tahsilat:** **Müşteriler → müşteri → Tahsil et** (nakit, kart, havale).
 
 **Vardiya kapanışı:** **Ara rapor (X)** ara kontroldür. **Vardiyayı kapat** → TL ve dövizleri say → fark gösterilir → Z raporu yazdırılır.
@@ -94,4 +106,4 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 
 **Acil durum:** kasa bilgisayarı bozulursa web adresine şifrenle gir → **Ayarlar → Senkron ve yedek → Acil durum modunu aç**. Personel restoranın internetinden PIN ile aynı adrese girer; yazıcı yoktur, mutfak ekranı kullanılır. Kasa bilgisayarı geri gelince mod kendiliğinden kapanır.
 
-**Online ve QR siparişler:** yeni online sipariş kasaya bildirim düşer; **Onayla** derken hazır olma süresi seçilir, müşteriye e-posta gider. QR'de her masanın ilk siparişini garson onaylar.
+**Online ve QR siparişler:** yeni online sipariş kasaya bildirim düşer; **Onayla** derken hazır olma süresi seçilir, müşteriye e-posta gider. QR'de her masada her telefonun ilk siparişini garson onaylar; sonra o telefon doğrudan sipariş verir, yeni bir telefon (ör. kartın fotoğrafını çeken biri) bir kez daha onay bekler.

@@ -400,6 +400,9 @@ final class Orders
         });
         self::recalc($target['id']);
         Notify::closeLine($voidId);
+        // the dish is waiting at the pass: the waiter of that bill hears "ready" like for any plate
+        $n = self::line($lineId);
+        \Sofrexa\Modules\Kitchen\Kitchen::callAgain($target['id'], (int) $n['round'], (string) $n['station']);
         $v = self::line($voidId);
         Audit::log('order.void_reuse', $v['name'] . ' ×' . self::qtyText((float) $v['qty']) . ' → ' . self::where($target), 'order', $target['id'], ['line' => $lineId, 'from' => $voidId]);
         return $lineId;

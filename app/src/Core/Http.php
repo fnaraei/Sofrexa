@@ -152,6 +152,14 @@ final class Flash
 
 final class Router
 {
+    /**
+     * The till's work: bills, payments, the drawer, the kitchen, stock. It changes the same rows on whichever copy does it,
+     * so it is done where the till is — the PC, or the web copy only while it stands in for the PC (emergency mode) or
+     * has no PC at all. Elsewhere these pages can be looked at, not acted on.
+     */
+    public const TILL_PERMS = ['orders.take', 'orders.void', 'orders.discount', 'orders.transfer', 'orders.qr_approve', 'bill.print',
+        'cash.pay', 'cash.shift', 'cash.moves', 'cash.nosale', 'kitchen.view', 'kitchen.ready', 'delivery.manage', 'stock.manage'];
+
     private array $routes = [];
 
     /** $opts: auth (staff login required, default true), perm (permission code), csrf (default true for POST). */
@@ -187,6 +195,9 @@ final class Router
             }
             if (!empty($opts['perm']) && !Auth::can($opts['perm'])) {
                 throw new HttpError(403, I18n::t('err.forbidden'));
+            }
+            if ($req->method === 'POST' && in_array($opts['perm'] ?? '', self::TILL_PERMS, true) && !\Sofrexa\Modules\QrOrder\QrOrders::owner()) {
+                throw new HttpError(409, I18n::t('err.till_only'));
             }
             if (is_array($handler)) {
                 [$class, $fn] = $handler;

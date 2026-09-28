@@ -1,6 +1,6 @@
 # Screens / صفحه‌ها
 
-Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **100 screens**. Every screen links to its frame. Overview images are in [`design/`](../design/).
+Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **108 screens** (8 added after the 2026-09-28 audit: cancelled dishes IP1–IP4, C1b, C8b, W6b, S4b). Every screen links to its frame. Overview images are in [`design/`](../design/).
 
 🆕 = added in design v1.1 (2026-09-28) · ✏️ = changed in v1.1 (Sofrexa branding, password login, loyalty points).
 
@@ -33,6 +33,7 @@ Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **100 screens**. 
 | W9 | Masalar — internet yok (yerel mod) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=20-912) |
 | W10 | Sipariş al · Desktop (kasa/tablet) | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=22-1214) |
 | W11 | Masalar (tüm bölümler) · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=23-1550) |
+| W6b 🆕 | Bildirimler — iptal ve yazıcı · Mobile (on the Kasa page) | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=135-2085) |
 
 ## 03 · Kasa · صندوق
 
@@ -52,6 +53,12 @@ Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **100 screens**. 
 | C10 🆕 | Kasa hareketleri · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=85-1082) |
 | C11 🆕 | Kasadan para çıkışı (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=85-1556) |
 | C12 🆕 | Sadakat puanı kullan (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=85-1758) |
+| IP1 🆕 | Hazır iptaller · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=128-1409) |
+| IP2 🆕 | Hazır iptaller · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=133-1742) |
+| IP3 🆕 | Masaya ver (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=133-10508) |
+| IP4 🆕 | Personele yaz (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=134-1987) |
+| C1b 🆕 | Kasa — iptal uyarısı · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=128-1528) |
+| C8b 🆕 | Kasa — iptal uyarısı · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=133-10367) |
 
 ## 04 · Mutfak · آشپزخانه
 
@@ -88,6 +95,7 @@ Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **100 screens**. 
 | S2 | Mal kabul (alış faturası) · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=38-341) |
 | S3 | Sayım (stok sayımı) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=39-529) |
 | S4 | Fire / zayi · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=38-606) |
+| S4b 🆕 | Fire / zayi — hazır iptaller · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=138-709) |
 | S5 | Reçete ve maliyet · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=39-722) |
 | S6 | Depo · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=37-386) |
 | S7 | Alım listesi · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=39-625) |

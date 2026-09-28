@@ -29,6 +29,19 @@ $appActions = [
 $bodyClass = 'page-till';
 $delta = $today['yesterday'] > 0 ? (int) round(($today['total'] - $today['yesterday']) * 100 / $today['yesterday']) : null;
 $chip = static fn(string $key, string $label, bool $m = false) => Ui::chip($label, $key === 'all', digits($counts[$key] ?? 0), ['data-filter' => $key]);
+// C1b / C8b: cancelled dishes the till still has to ask the kitchen about
+$pending = \Sofrexa\Modules\Orders\Voids::list('pending');
+if ($pending) {
+    $and = ' ' . t('voids.and') . ' ';
+    $dishes = array_map(static fn(array $r): string => $r['where'] . ' · ' . digits(\Sofrexa\Modules\Orders\Orders::qtyText($r['qty'])) . '× ' . $r['name'], array_slice($pending, 0, 3));
+    $places = array_values(array_unique(array_column(array_slice($pending, 0, 4), 'where')));
+    $n = digits(count($pending));
+    $topBanner = '<div class="voidalert"><div class="banner banner--warning grow" role="status">' . icon('alert', 20)
+        . '<div class="col" style="gap:2px"><div class="banner__title"><span class="only-desktop">' . e(t('voids.banner', ['n' => $n])) . '</span><span class="only-mobile">' . e(t('voids.banner_m', ['n' => $n])) . '</span></div>'
+        . '<div class="banner__text"><span class="only-desktop">' . e(t('voids.banner_text', ['list' => implode($and, $dishes) . (count($pending) > 3 ? '…' : '')])) . '</span>'
+        . '<span class="only-mobile">' . e(t('voids.banner_text_m', ['list' => implode($and, $places)])) . '</span></div></div></div>'
+        . Ui::btn(t('voids.open'), ['style' => 'secondary', 'size' => 's', 'href' => '/cashier/voids?f=pending']) . '</div>';
+}
 ?>
 <?php if (!$shift): ?>
   <div class="banner banner--warning" role="status"><?= icon('lock', 20) ?><div class="col grow" style="gap:2px"><div class="banner__title"><?= e(t('cash.no_shift_t')) ?></div><div class="banner__text"><?= e(t('cash.no_shift')) ?></div></div>

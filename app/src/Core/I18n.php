@@ -98,6 +98,38 @@ final class I18n
         return self::num($n, abs($n - round($n)) < 0.001 ? 0 : $maxDecimals);
     }
 
+    /**
+     * Turkish dative ("to …") after a table number or a name, with the apostrophe: "Masa 4’e", "Masa 2’ye", "Masa 9’a",
+     * "Ali’ye", "Selin’e", "Mehmet’e". A number follows how it is read (dört → e, iki → ye, dokuz → a).
+     */
+    public static function trDative(string $s): string
+    {
+        $s = rtrim($s);
+        $words = preg_split('/[\s·#]+/u', $s) ?: [''];
+        $last = (string) end($words);
+        if (preg_match('/^\d+$/', $last)) {
+            $n = (int) $last;
+            $units = [1 => 'e', 2 => 'ye', 3 => 'e', 4 => 'e', 5 => 'e', 6 => 'ya', 7 => 'ye', 8 => 'e', 9 => 'a'];
+            $tens = [1 => 'a', 2 => 'ye', 3 => 'a', 4 => 'a', 5 => 'ye', 6 => 'a', 7 => 'e', 8 => 'e', 9 => 'a'];
+            $suffix = $n === 0 ? 'a' : ($n % 10 ? $units[$n % 10] : ($n % 100 ? $tens[intdiv($n % 100, 10)] : 'e'));
+            return $s . '’' . $suffix;
+        }
+        $low = mb_strtolower(strtr($last, ['I' => 'ı', 'İ' => 'i']), 'UTF-8');
+        preg_match_all('/[aıoueiöü]/u', $low, $m);
+        $vowel = end($m[0]) ?: 'e';
+        $suffix = in_array($vowel, ['a', 'ı', 'o', 'u'], true) ? 'a' : 'e';
+        return $s . '’' . (preg_match('/[aıoueiöü]$/u', $low) ? 'y' : '') . $suffix;
+    }
+
+    /** Turkish "from" after a clock time, as it is read: "16:00’dan", "12:00’den", "13:00’ten", "18:45’ten", "19:40’tan". */
+    public static function trFromTime(string $hhmm): string
+    {
+        $units = [1 => 'den', 2 => 'den', 3 => 'ten', 4 => 'ten', 5 => 'ten', 6 => 'dan', 7 => 'den', 8 => 'den', 9 => 'dan'];
+        $tens = [1 => 'dan', 2 => 'den', 3 => 'dan', 4 => 'tan', 5 => 'den'];
+        $n = substr($hhmm, 3, 2) === '00' ? (int) substr($hhmm, 0, 2) : (int) substr($hhmm, 3, 2);
+        return $hhmm . '’' . ($n === 0 ? 'dan' : ($n % 10 ? $units[$n % 10] : $tens[intdiv($n, 10)] ?? 'den'));
+    }
+
     public static function faDigits(string $s): string
     {
         return strtr($s, ['0' => '۰', '1' => '۱', '2' => '۲', '3' => '۳', '4' => '۴', '5' => '۵', '6' => '۶', '7' => '۷', '8' => '۸', '9' => '۹']);

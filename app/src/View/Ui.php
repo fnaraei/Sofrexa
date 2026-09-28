@@ -148,10 +148,12 @@ final class Ui
     }
 
     /** Stat card. $o: delta, down (bool), brand (bool), id. */
+    /** $o: delta (small line), icon (its icon; muted unless tone says otherwise), tone up | down | plain | accent, down (red), brand, id. */
     public static function stat(string $label, string $value, array $o = []): string
     {
+        $tone = $o['tone'] ?? (!empty($o['down']) ? 'down' : (!empty($o['icon']) ? 'plain' : 'up'));
         $delta = isset($o['delta']) && $o['delta'] !== ''
-            ? '<div class="stat__delta' . (!empty($o['down']) ? ' is-down' : '') . (!empty($o['icon']) ? ' is-plain' : '') . '">' . icon($o['icon'] ?? (!empty($o['down']) ? 'arrow-down' : 'trend-up'), 14) . '<span>' . e($o['delta']) . '</span></div>' : '';
+            ? '<div class="stat__delta' . (in_array($tone, ['down', 'plain', 'accent'], true) ? ' is-' . $tone : '') . '">' . icon($o['icon'] ?? ($tone === 'down' ? 'arrow-down' : 'trend-up'), 14) . '<span>' . e($o['delta']) . '</span></div>' : '';
         return '<div class="stat' . (!empty($o['brand']) ? ' stat--brand' : '') . '"' . (isset($o['id']) ? ' id="' . e($o['id']) . '"' : '') . '><div class="stat__label">' . e($label) . '</div><div class="stat__value num">' . e($value) . '</div>' . $delta . '</div>';
     }
 

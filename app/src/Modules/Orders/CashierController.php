@@ -107,7 +107,7 @@ final class CashierController
         Notify::closeFor($o['id'], 'bill');
         if ($r['paid']) {
             Notify::closeFor($o['id']);
-            Flash::set('success', $r['change'] > 0 ? I18n::t('pay.done', ['change' => money($r['change'])]) : I18n::t('pay.done_plain'));
+            Flash::set('success', !empty($r['free']) ? I18n::t('pay.free_done') : ($r['change'] > 0 ? I18n::t('pay.done', ['change' => money($r['change'])]) : I18n::t('pay.done_plain')));
             Response::json(['ok' => true, 'redirect' => '/cashier', 'change' => $r['change']]);
         }
         $persons = $req->int('persons');

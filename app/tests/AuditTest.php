@@ -128,6 +128,9 @@ return [
         same(10000, (int) Orders::get($o2)['total']);
         same(0, Reports::waste($f, $t), 'not waste any more');
         same(8.0, Stock::onHand($un), 'no new flour taken');
+        same(1, (int) Db::value("SELECT COUNT(*) FROM notifications WHERE kind = 'ready' AND ref_id = ? AND done_at IS NULL", [$o2]), 'table 2’s waiter hears "ready"');
+        $row = \Sofrexa\Modules\Orders\Voids::list()[0];
+        same(['table', 'Masa 2', 'ready'], [$row['state'], $row['to'], $row['stage']]);
         Orders::pay($o2, [['method' => 'card', 'amount' => 10000]], null, false);
         same(1000, Reports::costOfSales($f, $t), 'its flour is the cost of table 2’s sale');
 
@@ -139,6 +142,8 @@ return [
         Orders::voidLine($l3, 'vazgeçti');
         same('pending', Db::value('SELECT void_stock FROM order_items WHERE id = ?', [$l3]));
         same(1, (int) Db::value("SELECT COUNT(*) FROM notifications WHERE kind = 'void' AND ref_type = 'order_item' AND ref_id = ? AND role = 'cashier'", [$l3]));
+        same([1, 1], [\Sofrexa\Modules\Orders\Voids::pendingCount(), \Sofrexa\Modules\Orders\Voids::stats()['table']]);
+        same([$l3], array_column(\Sofrexa\Modules\Orders\Voids::list('pending'), 'id'));
         // a waiter wants it: charged to them
         Orders::chargeVoidedToStaff($l3, $s['boss']);
         same(['staff', 10000], [Db::value('SELECT void_stock FROM order_items WHERE id = ?', [$l3]), (int) Db::value("SELECT total FROM payroll WHERE kind = 'charge' AND user_id = ?", [$s['boss']])]);
@@ -304,6 +309,11 @@ return [
         same([50.0, 1], [(float) $k['late_pct'], $k['late_orders']]);
     },
 
+    'Turkish dative after a table number or a name' => function (): void {
+        same(['Masa 4’e', 'Masa 2’ye', 'Masa 9’a', 'Masa 6’ya', 'Masa 10’a', 'Masa 20’ye', 'Masa 100’e', 'Ali’ye', 'Selin’e', 'Mehmet’e', 'Ayşe’ye', 'Paket #12 · Burak’a'],
+            array_map([\Sofrexa\Core\I18n::class, 'trDative'], ['Masa 4', 'Masa 2', 'Masa 9', 'Masa 6', 'Masa 10', 'Masa 20', 'Masa 100', 'Ali', 'Selin', 'Mehmet', 'Ayşe', 'Paket #12 · Burak']));
+    },
+
     'F23 today is compared with the same hours yesterday' => function () use ($at): void {
         Clock::freeze($at('2026-09-28 14:00'));
         $p = Reports::period('today');
@@ -423,6 +433,34 @@ return [
         Clock::freeze(Clock::ms() + 61_000);
         Spooler::work();
         same('expired', Db::value("SELECT status FROM print_jobs WHERE kind = 'drawer'"), 'the drawer does not spring open later');
+    },
+
+    'the web copy does not take payments or change bills unless it stands in for the till' => function () use ($setup): void {
+        $setup();
+        $keep = $_SERVER;
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['REQUEST_URI'] = '/till-test';
+        $ran = 0;
+        $router = new \Sofrexa\Core\Router();
+        $router->post('/till-test', static function () use (&$ran): void {
+            $ran++;
+        }, ['perm' => 'cash.pay', 'csrf' => false]);
+        $router->dispatch(new \Sofrexa\Core\Request());
+        same(1, $ran, 'on the PC');
+        App::setConfig('role', 'web');
+        App::setConfig('sync.key', str_repeat('k', 32));
+        try {
+            $router->dispatch(new \Sofrexa\Core\Request());
+            throw new LogicException('paid on the web copy');
+        } catch (\Sofrexa\Core\HttpError $e) {
+            same(409, $e->status);
+        }
+        Db::exec('INSERT OR REPLACE INTO sync_state (key, value) VALUES (?, ?)', ['emergency', json_encode(['ip' => '198.51.100.20', 'at' => Clock::ms()])]);
+        $router->dispatch(new \Sofrexa\Core\Request());
+        same(2, $ran, 'in emergency mode it is the till');
+        App::setConfig('role', 'pc');
+        App::setConfig('sync.key', '');
+        $_SERVER = $keep;
     },
 
     'S02 PIN sign-in is offered on the web copy during emergency mode' => function () use ($setup): void {

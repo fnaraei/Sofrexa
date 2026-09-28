@@ -15,6 +15,15 @@ $bottom = Ui::btn(t('waste.save'), ['style' => 'danger', 'size' => 'l', 'block' 
 $headActions = Ui::btn(t('waste.save'), ['style' => 'danger', 'icon' => 'trash', 'type' => 'submit', 'attrs' => ['form' => 'waste-form']]);
 $str = ['stock' => t('waste.stock', ['q' => '{q}', 'unit' => '{unit}', 'price' => '{price}']), 'qty' => t('waste.qty', ['unit' => '{unit}']), 'worth' => t('waste.worth', ['amount' => '{amount}'])];
 ?>
+<?php
+// S4b: cooked dishes cancelled at a table are waste too — they are handled on the till's "Hazır iptaller" page
+$wasteN = can('cash.pay') ? \Sofrexa\Modules\Orders\Voids::wasteCount() : 0;
+$pendingN = can('cash.pay') ? \Sofrexa\Modules\Orders\Voids::pendingCount() : 0;
+?>
+<?php if ($wasteN || $pendingN): ?>
+  <a class="selcard selcard--link voidcard" href="/cashier/voids"><?= icon('x-circle', 22) ?><span class="grow col gap-2"><span class="t-label-l"><?= e(t('voids.card')) ?></span>
+    <span class="t-body-s c-muted"><?= e(t('voids.card_sub', ['w' => digits($wasteN), 'p' => digits($pendingN)])) ?></span></span><?= icon('chevron-right', 20) ?></a>
+<?php endif ?>
 <form class="waste" id="waste-form" method="post" action="/stock/waste" data-ajax data-toast="off" data-waste data-str='<?= e(json_encode($str, JSON_UNESCAPED_UNICODE)) ?>' autocomplete="off">
   <?= csrf_field() ?>
   <input type="hidden" name="stock_item_id" value="">

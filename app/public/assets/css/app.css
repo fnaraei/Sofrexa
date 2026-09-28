@@ -1697,3 +1697,52 @@ a.strow:hover { background: var(--bg-surface-2); }
 .dish__head h3 { flex: 1; min-width: 0; }
 .dish__head .badge { flex: none; }
 .dish__price { display: inline-flex; align-items: baseline; gap: 6px; }
+
+/* ---------------------------------------------------------------- cancelled dishes (Figma IP1–IP4, C1b, C8b, S4b, W6b) */
+.stat__delta.is-accent, .stat--brand .stat__delta.is-accent { color: var(--text-accent); }
+.voidtable__title { display: flex; align-items: center; gap: 8px; padding: 14px 16px 12px; }
+.voidrow { display: grid; grid-template-columns: minmax(0, 224fr) minmax(0, 180fr) minmax(0, 170fr) 130px minmax(max-content, 336fr); align-items: center; gap: 12px;
+  padding: 12px 16px; border-top: 1px solid var(--border-default); }
+.voidrow--head { padding: 9px 16px; border-top: 0; background: var(--bg-surface-2); font: 700 11px/14px var(--font-ui); letter-spacing: 1.1px; text-transform: uppercase; color: var(--text-muted); }
+.voidrow--head .tend { text-align: end; }
+.voidrow__acts { display: flex; align-items: center; justify-content: flex-end; gap: 8px; text-align: end; }
+.voidstage { display: inline-flex; align-items: center; gap: 4px; font: 700 12px/16px var(--font-ui); letter-spacing: 0.2px; flex: none; }
+.voidstage .ic { width: 14px; height: 14px; }
+.voidstage--sent { color: var(--text-info); }
+.voidstage--ready { color: var(--text-success); }
+.voidnote .ic { flex: none; }
+.voidlist { padding: 4px 12px; gap: 0; }
+.voiditem { display: flex; flex-direction: column; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border-default); }
+.voiditem:last-child { border-bottom: 0; }
+.voiditem__top > .col:last-child { flex: none; }
+.voiditem .btn { min-width: 0; }
+/* IP3 / IP4 radio cards */
+.optlist { display: flex; flex-direction: column; gap: 8px; }
+.optrow { position: relative; display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 12px 14px; border-radius: var(--radius-lg);
+  background: var(--bg-surface); box-shadow: inset 0 0 0 1px var(--border-default); cursor: pointer; }
+.optrow[hidden] { display: none; }
+.optrow > input { position: absolute; opacity: 0; pointer-events: none; }
+.optrow__radio { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--bg-surface); box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.optrow:has(> input:checked) { background: var(--bg-accent-soft); box-shadow: inset 0 0 0 2px var(--border-accent); }
+.optrow:has(> input:checked) .optrow__radio { background: var(--bg-brand); box-shadow: none; }
+.optrow:has(> input:checked) .optrow__radio::after { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--bg-surface); }
+.optrow:has(> input:focus-visible) { outline: 2px solid var(--border-focus, var(--border-accent)); outline-offset: 2px; }
+.optrow .avatar--s { background: var(--bg-accent-soft); }
+.optrow:has(> input:checked) .avatar--s { background: var(--bg-surface); }
+.voidsheet__foot { padding-top: 4px; }
+/* C1b / C8b: the till's banner; S4b: the card on the waste page */
+.topbanner { padding: 4px 16px 8px; }
+.voidalert { display: flex; align-items: center; border-radius: var(--radius-lg); background: var(--bg-warning-soft); padding-inline-end: 12px; }
+.voidalert .banner { background: none; }
+.voidalert > .btn { flex: none; }
+.selcard--link { text-decoration: none; }
+.voidcard > .ic:first-child { color: var(--icon-danger); }
+.voidcard > .ic:last-child { color: var(--icon-muted, var(--text-muted)); }
+/* W6b: the cancel card (the kitchen question in a row of its own) and the printer card */
+.ncard__ic--danger { background: var(--bg-danger-soft); color: var(--icon-danger); }
+.ncard__acts--stack { flex-direction: column; align-items: stretch; }
+.ncard__acts--stack > .row { gap: 8px; }
+.ncard__acts--stack > .row > .btn:last-child { flex: 1 1 0; min-width: 0; }
+@media (min-width: 1024px) {
+  .topbanner { padding: 0; }
+}

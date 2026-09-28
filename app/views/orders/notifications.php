@@ -48,19 +48,24 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
           'bill' => Ui::btn(t('notif.prebill'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/prebill']]),
           'call' => Ui::btn(t('notif.going'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
           'online' => $n['ref_id'] ? Ui::btn(t('notif.review'), ['size' => 's', 'attrs' => ['data-load-sheet' => '/delivery/' . $n['ref_id'] . '/sheet']]) : Ui::btn(t('notif.review'), ['size' => 's', 'href' => '/delivery']),
-          // the till asked the kitchen: not made → back to stock; made → waste (it can still go to another bill on the waste page)
-          'void' => Ui::btn(t('notif.void_back'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/returned']])
-              . Ui::btn(t('notif.void_waste'), ['size' => 's', 'attrs' => ['data-post' => $base . '/waste']]),
-          'printer' => Ui::btn(t('notif.retry'), ['size' => 's', 'attrs' => ['data-post' => $base . '/retry']]),
+          // W6b: the till asked the kitchen — made → waste (it can still go to another bill); "not made" gets a row of its own
+          'void' => Ui::btn(t('notif.void_waste'), ['size' => 's', 'attrs' => ['data-post' => $base . '/waste']]),
+          'printer' => Ui::btn(t('notif.retry'), ['style' => 'secondary', 'size' => 's', 'attrs' => ['data-post' => $base . '/retry']]),
           default => Ui::btn(t('notif.open'), ['size' => 's', 'attrs' => ['data-post' => $base . '/done']]),
-      }; ?>
+      };
+      $later = Ui::btn(t('notif.later'), ['style' => 'ghost', 'size' => 's', 'attrs' => ['data-post' => $base . '/later']]); ?>
     <article class="ncard<?= $n['read_at'] ? '' : ' is-new' ?>">
       <div class="ncard__row">
         <span class="ncard__ic ncard__ic--<?= $tone ?>"><?= icon($ic, 22) ?></span>
-        <div class="grow col gap-2"><span class="t-label-l"><?= e($head) ?></span><?php if ($subText !== ''): ?><span class="t-body-s c-muted ellipsis"><?= e($subText) ?></span><?php endif ?></div>
+        <div class="grow col gap-2"><span class="t-label-l"><?= e($head) ?></span><?php if ($subText !== ''): ?><span class="t-body-s c-muted<?= $n['kind'] === 'printer' ? '' : ' ellipsis' ?>"><?= e($subText) ?></span><?php endif ?></div>
         <span class="t-label-s c-muted nowrap"><?= e($ago((int) $n['at'])) ?></span>
       </div>
-      <div class="ncard__acts"><?= Ui::btn(t('notif.later'), ['style' => 'ghost', 'size' => 's', 'attrs' => ['data-post' => $base . '/later']]) ?><?= $action ?></div>
+      <?php if ($n['kind'] === 'void'): ?>
+        <div class="ncard__acts ncard__acts--stack"><?= Ui::btn(t('notif.void_back'), ['style' => 'secondary', 'size' => 's', 'block' => true, 'attrs' => ['data-post' => $base . '/returned']]) ?>
+          <div class="row"><?= $later . $action ?></div></div>
+      <?php else: ?>
+        <div class="ncard__acts"><?= $later . $action ?></div>
+      <?php endif ?>
     </article>
   <?php endforeach ?>
   <?php foreach ($done as $n):
