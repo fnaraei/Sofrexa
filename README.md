@@ -15,7 +15,7 @@ It is **local-first**. The cashier PC runs the in-house server, so service never
 ## Documents
 
 - **[PLAN.md](PLAN.md)** — plan and roadmap (Persian). Tick boxes show what is done.
-- **[docs/screens.md](docs/screens.md)** — all 73 designed screens, each linking to its Figma frame.
+- **[docs/screens.md](docs/screens.md)** — all 97 designed screens, each linking to its Figma frame.
 - **[docs/design-handoff.md](docs/design-handoff.md)** — tokens → CSS variables, components and layout rules. The build follows Figma exactly.
 - **[docs/figma-ids.json](docs/figma-ids.json)** — Figma page, component and variable-collection IDs.
 - **[docs/itkafe-schema.md](docs/itkafe-schema.md)** — map of the legacy ItKafe database, for the migration.
@@ -41,4 +41,4 @@ Sofrexa is the platform; each restaurant is a tenant with its own name and logo.
 
 ## Status
 
-Design is complete (73 screens, 34 components, 98 icons). Implementation has not started — see the status table in [PLAN.md](PLAN.md).
+Design v1.1 is complete (97 screens, 36 components, 98 icons). Implementation has not started — see the status table in [PLAN.md](PLAN.md).

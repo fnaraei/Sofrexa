@@ -81,7 +81,44 @@ Every Figma variable has its CSS name set as "code syntax" (Dev Mode shows it). 
   - Every amount is stored in TL plus the original currency, amount and rate.
 - **Void after sending:** needs a reason. It is logged, shown in R6 and printed on the Z report.
 - **Online ordering:**
-  - Email + 6-digit code login.
+  - Email + password login; the email is verified once with a 6-digit code.
   - Minimum ₺500 (editable in SE3). The cart shows a warning under the minimum (O5).
   - Delivery is free. Payment is on delivery only (cash / card on the courier's POS).
 - **Prints (P1–P6):** plain black on white, printed directly without a browser dialog. The kitchen and bar tickets use big text and inverted blocks for "EK SİPARİŞ" and allergy notes.
+
+## 5. Added in design v1.1 (2026-09-28)
+
+New screens are marked 🆕 in [screens.md](screens.md). Build them with the same components; the rules below are the parts that are not obvious from the pictures.
+
+- **Side navigation** has a new item, `Finans` (wallet icon), between `Raporlar` and `Ayarlar`.
+- **Tenant profile (SE5/SE6)** is the only source of the restaurant name, logo, address, phones and receipt texts. Nothing in the code may hard-code "Basilic".
+- **Backup and restore (SE7–SE9):**
+  - Restore is for the manager role only.
+  - The user must type `GERİ YÜKLE` to confirm.
+  - A backup of the current state is taken automatically before the restore starts.
+- **Quick price and stock (M7/M8):**
+  - Changes stay in a preview (highlighted cells) until one save.
+  - Bulk change: category × percentage × rounding step.
+  - Old prices are written to the activity log.
+  - Daily stock left empty means unlimited. When it reaches 0 the item becomes "Tükendi" everywhere.
+- **Cash drawer (C10/C11):**
+  - Every movement is append-only. A mistake is fixed with a reverse entry, never an edit.
+  - Opening the drawer without a sale is its own logged event.
+  - Cash-drawer expenses also appear in Finance (FI1).
+- **Loyalty (CU5, C12):**
+  - Points are earned on the amount actually paid, after discounts and points.
+  - Tier rates: Bronze 5 %, Silver 7 %, Gold 10 %. 1 point = ₺1. Minimum use is 100 points.
+  - ItKafe bonus balances are imported as points.
+- **Roles (ST5)** set the defaults. A person-level exception (ST4) overrides their role.
+- **Activity log (ST6/ST7):**
+  - Written by the server for every sensitive action: login and failed PIN, void, discount, price change, drawer open, cash in and out, settings change, backup and restore.
+  - No edit or delete endpoint exists.
+- **Finance:**
+  - Supplier purchases are not an expense line in profit and loss (FI3). They reach it as the recipe cost of what was sold (SMM) plus waste. The difference goes to stock value.
+  - FI1 is the cash view; FI3 is the accrual view.
+- **Online accounts (O1, O2, O7, O8, O9):**
+  - Email plus password; the email is the username.
+  - A 6-digit code verifies the email before the first order.
+  - Password reset uses the same code flow.
+  - QR customers never log in.
+- **QR approval:** the first QR order of a table session needs waiter approval (W5). The session ends when the bill is settled.

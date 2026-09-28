@@ -26,7 +26,8 @@
     "reports": "4:14",
     "settings": "4:15",
     "customer-qr-online": "4:16",
-    "prints": "4:17"
+    "prints": "4:17",
+    "finance": "94:671"
   },
   "foundations": {
     "colorsLight": "56:2",
@@ -74,7 +75,7 @@
     "Brand/PoweredBy": "64:193"
   },
   "counts": {
-    "screens": 73,
+    "screens": 97,
     "componentSets": 36,
     "icons": 98,
     "variables": 123,
@@ -90,5 +91,21 @@
       "mark-on-dark": "430f45acf09e2d51ea3c9caf4eac2bd3eb009847"
     },
     "wordmarkFont": "Manrope ExtraBold, letter-spacing 4%"
-  }
+  },
+  "sections": {
+    "login": "57:158",
+    "waiter": "57:6459",
+    "cashier": "57:6460",
+    "kitchen": "57:6461",
+    "menu": "57:6462",
+    "warehouse": "57:6463",
+    "customers": "58:411",
+    "staff": "58:6459",
+    "reports": "58:6460",
+    "settings": "58:6461",
+    "customer-qr-online": "58:6462",
+    "prints": "58:6463",
+    "finance": "94:672"
+  },
+  "designVersion": "1.1 (2026-09-28)"
 }
