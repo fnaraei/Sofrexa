@@ -29,7 +29,7 @@ final class Sync
 
     public static function touch(string $table, string $id): void
     {
-        if (self::$muted || (!in_array($table, self::MUTABLE, true) && !in_array($table, self::APPEND, true))) {
+        if (self::$muted || !self::enabled() || (!in_array($table, self::MUTABLE, true) && !in_array($table, self::APPEND, true))) {
             return;
         }
         Db::exec('INSERT INTO sync_outbox (tbl, row_id, at) VALUES (?, ?, ?)', [$table, $id, Clock::ms()]);
@@ -45,6 +45,15 @@ final class Sync
         } finally {
             self::$muted = $was;
         }
+    }
+
+    /**
+     * The PC records changes only when a web copy is configured (the first sync sends a full snapshot anyway);
+     * the web copy always records, because its QR and online orders must reach the PC.
+     */
+    public static function enabled(): bool
+    {
+        return App::isWeb() || (string) App::config('sync.remote_url', '') !== '';
     }
 
     public static function isReplicated(string $table): bool
