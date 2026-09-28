@@ -20,7 +20,7 @@ final class Tickets
         $byStation = [];
         foreach ($o['lines'] as $l) {
             if (in_array($l['id'], $lineIds, true)) {
-                $byStation[$l['station']][] = $l;
+                $byStation[$l['station'] ?: 'kitchen'][] = $l;
             }
         }
         foreach ($byStation as $station => $lines) {

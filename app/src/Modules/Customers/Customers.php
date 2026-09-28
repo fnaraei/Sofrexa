@@ -417,7 +417,8 @@ final class Customers
         foreach ($rows as $r) {
             fputcsv($h, [$r['name'], $r['phone'], $r['email'], $r['company'], $r['tax_no'], $r['tag'] !== '' ? I18n::t('cust.tag.' . $r['tag'], [], 'tr') : '',
                 $r['orders_n'], $r['last_at'] ? date('d.m.Y', intdiv($r['last_at'], 1000)) : '',
-                number_format($r['balance'] / 100, 2, ',', '.'), Loyalty::balance($r['id']), $tiers[$r['tier_id']] ?? ''], ';', '"', '');
+                // a customer with no tier has no tier_id: null is not a key (PHP 8.5 says so)
+                number_format($r['balance'] / 100, 2, ',', '.'), Loyalty::balance($r['id']), $r['tier_id'] !== null ? ($tiers[$r['tier_id']] ?? '') : ''], ';', '"', '');
         }
         rewind($h);
         return (string) stream_get_contents($h);

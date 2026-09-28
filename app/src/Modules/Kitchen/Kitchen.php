@@ -121,6 +121,7 @@ final class Kitchen
         }
         if ($l['status'] === 'ready') {
             Db::save('order_items', ['id' => $lineId, 'status' => 'sent', 'ready_at' => null]);
+            self::retell($l['order_id']); // a plate taken back leaves the waiter's alert
             return 'sent';
         }
         if (count(self::open($l['order_id'], (int) $l['round'], $l['station'])) <= 1) {
@@ -194,12 +195,19 @@ final class Kitchen
      */
     public static function retell(string $orderId): void
     {
-        $ready = Db::rows("SELECT id, round, station FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0", [$orderId]);
-        $listed = Notify::keepLines($orderId, array_column($ready, 'id'));
+        $ready = Db::rows("SELECT id, round, station, name, qty FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0", [$orderId]);
+        // what the alert lists is rebuilt from the lines as they are now: a partly cancelled plate shows its new count
+        $listed = Notify::keepLines($orderId, array_map(static fn(array $l): array => ['id' => $l['id'], 'name' => $l['name'], 'qty' => Orders::qtyText((float) $l['qty'])], $ready));
+        // a plate tapped as plated on a ticket that is not finished yet is not the waiter's business until "Hazır"
+        $unfinished = [];
+        foreach (Db::rows("SELECT DISTINCT round, station FROM order_items WHERE order_id = ? AND status = 'sent' AND deleted = 0", [$orderId]) as $u) {
+            $unfinished[$u['round'] . '|' . $u['station']] = true;
+        }
         $groups = [];
         foreach ($ready as $l) {
-            if (!in_array((string) $l['id'], $listed, true)) {
-                $groups[$l['round'] . '|' . $l['station']] = [(int) $l['round'], (string) $l['station']];
+            $key = $l['round'] . '|' . $l['station'];
+            if (!in_array((string) $l['id'], $listed, true) && !isset($unfinished[$key])) {
+                $groups[$key] = [(int) $l['round'], (string) $l['station']];
             }
         }
         foreach ($groups as [$round, $station]) {

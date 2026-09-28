@@ -538,6 +538,10 @@ final class Orders
             throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
         }
         Db::tx(static function () use ($fromId, $intoId, $from, $into): void {
+            // points used beyond what a bill can take off (it shrank since) go back now, while their value is still
+            // known: once frozen to an amount below, nothing would tell the rest was never used
+            \Sofrexa\Modules\Customers\Loyalty::settle($fromId);
+            \Sofrexa\Modules\Customers\Loyalty::settle($intoId);
             $entries = [];
             foreach ([$intoId => $into, $fromId => $from] as $id => $bill) {
                 foreach (self::effective(\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($id), (int) $bill['subtotal']) as $d) {
@@ -614,6 +618,7 @@ final class Orders
             $sub = (int) Db::value("SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]);
             $moved = (int) Db::value('SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE id IN (' . Db::in($ids) . ')', $ids);
             $rest = $sub - $moved;
+            \Sofrexa\Modules\Customers\Loyalty::settle($orderId); // as in merge: before the discounts are frozen
             [$mine, $theirs, $points] = self::shareDiscounts(\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId), $sub, $moved);
             // what was already paid (money or points) must still be covered by what stays on this bill
             $restTotal = $rest - min($rest, self::discountTotal($mine, $rest));

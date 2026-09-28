@@ -23,6 +23,13 @@ final class App
             if (!(error_reporting() & $no)) {
                 return false;
             }
+            // a deprecation is PHP saying something will stop working in a later version. While developing (debug) it
+            // stops the page so it gets fixed; in the restaurant it goes to the log and the page carries on — a newer
+            // PHP on the host must not turn each of them into an error page
+            if (($no === E_DEPRECATED || $no === E_USER_DEPRECATED) && !self::config('debug', false)) {
+                @error_log(date('c') . ' ' . $msg . ' in ' . $file . ':' . $line . "\n", 3, self::storage('logs') . '/php-deprecated.log');
+                return true;
+            }
             throw new \ErrorException($msg, 0, $no, $file, $line);
         });
     }

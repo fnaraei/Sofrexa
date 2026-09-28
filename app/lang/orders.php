@@ -193,6 +193,7 @@ return [
     'pay.over_acc' => ['Fark cari hesaptan ödenmişti. Müşterinin borcundan düşülür, kasadan para çıkmaz.', 'The difference was paid on account. It comes off the customer’s debt; no money leaves the drawer.', 'اضافه از حساب نسیه پرداخت شده بود. از بدهی مشتری کم می‌شود و پولی از صندوق بیرون نمی‌رود.', 'Разница была оплачена в долг. Она списывается с долга гостя, из кассы деньги не выдаются.'],
     'pay.over_back_acc' => ['Cariden düşülecek', 'Off the account', 'کسر از حساب نسیه', 'Списать с долга'],
     'pay.over_balance' => ['Yeni cari bakiye: {amount}', 'New account balance: {amount}', 'ماندهٔ تازهٔ حساب: {amount}', 'Новый долг: {amount}'],
+    'pay.over_balance_n' => ['{name}: {share} düşülür · yeni bakiye {amount}', '{name}: {share} off · new balance {amount}', '{name}: {share} کم می‌شود · ماندهٔ تازه {amount}', '{name}: −{share} · новый долг {amount}'],
     'pay.over_go_acc' => ['Borçtan düş ve kapat', 'Take off the debt and close', 'کسر از بدهی و بستن', 'Списать с долга и закрыть'],
     'pay.over_done_acc' => ['{amount} cari borçtan düşüldü, hesap kapandı', '{amount} taken off the account, bill closed', '{amount} از بدهی نسیه کم شد و صورتحساب بسته شد', 'С долга списано {amount}, счёт закрыт'],
     'pay.over_badge' => ['İade bekliyor', 'Refund due', 'منتظر بازپرداخت', 'Ожидает возврата'],

@@ -79,10 +79,15 @@ foreach ($o['payments'] as $p) {
     $paidBy[$p['method']] = ($paidBy[$p['method']] ?? 0) + (int) $p['amount'];
 }
 $paidText = implode(' · ', array_map(static fn(string $m, int $a): string => t('pay.m_' . $m) . ' ' . money($a), array_keys($paidBy), $paidBy));
-$accountId = array_key_first($plan['account']);
-$accountName = $accountId !== null ? (string) \Sofrexa\Core\Db::value('SELECT name FROM customers WHERE id = ?', [$accountId]) : '';
-if ($accountName !== '') {
-    $paidText .= ' · ' . $accountName;
+// each customer whose account takes part: their name, their share and their own new balance (a bill can be put on
+// more than one account); the "Ödenen" line names all of them
+$accounts = [];
+foreach ($plan['account'] as $cid => $share) {
+    $accounts[] = ['name' => (string) \Sofrexa\Core\Db::value('SELECT name FROM customers WHERE id = ?', [(string) $cid]), 'share' => (int) $share,
+        'balance' => \Sofrexa\Modules\Orders\Accounts::balance((string) $cid) - (int) $share];
+}
+if ($accounts) {
+    $paidText .= ' · ' . implode(', ', array_filter(array_column($accounts, 'name')));
 }
 ?>
 <?php if (!$shift): ?>
@@ -117,9 +122,11 @@ if ($accountName !== '') {
       <?php if ($offAccount > 0): ?><div class="payover__row payover__row--back"><span class="t-heading-m"><?= e(t('pay.over_back_acc')) ?></span><span class="t-number-l num c-info"><?= e(money($offAccount)) ?></span></div><?php endif ?>
       <?php if ($payOut > 0): ?><div class="payover__row<?= $offAccount > 0 ? '' : ' payover__row--back' ?>"><span class="t-heading-m"><?= e(t('pay.over_back')) ?></span><span class="t-number-l num c-warning"><?= e(money($payOut)) ?></span></div><?php endif ?>
     </div>
-    <?php if ($accountId !== null): ?>
-      <div class="payover__bal t-body-s c-secondary"><?= icon('wallet', 16) ?><span><?= e(t('pay.over_balance', ['amount' => money(\Sofrexa\Modules\Orders\Accounts::balance($accountId) - $offAccount)])) ?></span></div>
-    <?php endif ?>
+    <?php foreach ($accounts as $a): ?>
+      <div class="payover__bal t-body-s c-secondary"><?= icon('wallet', 16) ?><span><?= e(count($accounts) > 1
+          ? t('pay.over_balance_n', ['name' => $a['name'], 'share' => money($a['share']), 'amount' => money($a['balance'])])
+          : t('pay.over_balance', ['amount' => money($a['balance'])])) ?></span></div>
+    <?php endforeach ?>
     <?php if ($payOut > 0): ?>
     <div class="col gap-8">
       <span class="overline"><?= e(t('pay.over_method')) ?></span>

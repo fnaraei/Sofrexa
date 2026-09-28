@@ -108,23 +108,33 @@ final class Notify
     }
 
     /**
-     * Trims the open ready alert of an order to the plates of $lines it still lists (a plate taken back by the kitchen,
-     * or moved to another bill, leaves it; one left with nothing is closed). It does not ring again for that. Returns
-     * the plates the alert still lists.
+     * Makes the open ready alert of an order match $ready — the plates really waiting on it, as rows [id, name, qty]:
+     * plates it lists that are no longer among them leave it (taken back by the kitchen, moved to another bill,
+     * cancelled; with none left it closes), and the ones it keeps show their count as it is now (a plate partly
+     * cancelled). It does not ring again for that. Returns the plates the alert still lists.
      */
-    public static function keepLines(string $orderId, array $lines): array
+    public static function keepLines(string $orderId, array $ready): array
     {
         $n = Db::row("SELECT * FROM notifications WHERE ref_type = 'order' AND ref_id = ? AND kind = 'ready' AND done_at IS NULL AND deleted = 0", [$orderId]);
         if (!$n) {
             return [];
         }
+        $now = [];
+        foreach ($ready as $r) {
+            $now[(string) $r['id']] = $r;
+        }
         $b = json_arr($n['body']);
         $had = array_map('strval', (array) ($b['lines'] ?? []));
-        $keep = array_values(array_intersect($had, array_map('strval', $lines)));
+        $keep = array_values(array_filter($had, static fn(string $id): bool => isset($now[$id])));
         if (!$keep) {
             self::done($n['id']);
-        } elseif ($keep !== $had) {
-            self::saveLines($n['id'], $b, $keep, $n['read_at']);
+            return [];
+        }
+        $items = array_map(static fn(string $id): array => ['id' => $id, 'name' => (string) $now[$id]['name'], 'qty' => (string) $now[$id]['qty']], $keep);
+        if ($keep !== $had || $items !== array_values(array_filter((array) ($b['items'] ?? []), 'is_array'))) {
+            $b['lines'] = $keep;
+            $b['items'] = $items;
+            Db::save('notifications', ['id' => $n['id'], 'body' => self::describe($b), 'read_at' => $n['read_at']]);
         }
         return $keep;
     }

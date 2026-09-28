@@ -81,7 +81,7 @@ $expOpt = array_combine([6, 12, 24, 36, 0], array_map(static fn(int $m): string 
       <section class="card card--pad0 loytop">
         <div class="ledger__title"><h2 class="t-heading-s grow"><?= e(t('loy.top')) ?></h2><?= Ui::chip(t('loy.this_year'), true, null, ['class' => 'chip chip--static is-selected']) ?></div>
         <div class="toprow toprow--head"><span><?= e(t('cust.c_customer')) ?></span><span><?= e(t('loy.c_tier')) ?></span><span><?= e(t('loy.c_spent')) ?></span><span><?= e(t('cust.c_points')) ?></span><span><?= e(t('cust.c_last')) ?></span></div>
-        <?php foreach ($top as $r): $tr = $tierNames[$r['tier_id']] ?? null; ?>
+        <?php foreach ($top as $r): $tr = $r['tier_id'] !== null ? ($tierNames[$r['tier_id']] ?? null) : null; ?>
           <a class="toprow" href="/customers/<?= e($r['id']) ?>">
             <?= Ui::who($r['name'], (string) $r['phone']) ?>
             <span><?= $tr ? Ui::badge($tr['name'], $tr['tone']) : '' ?></span>
