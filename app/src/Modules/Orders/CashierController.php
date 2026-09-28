@@ -110,7 +110,6 @@ final class CashierController
         $r = Orders::pay($o['id'], $parts, $customer, $req->bool('receipt'), $share);
         Notify::closeFor($o['id'], 'bill');
         if ($r['paid']) {
-            Notify::closeFor($o['id']);
             Flash::set('success', !empty($r['free']) ? I18n::t('pay.free_done') : ($r['change'] > 0 ? I18n::t('pay.done', ['change' => money($r['change'])]) : I18n::t('pay.done_plain')));
             Response::json(['ok' => true, 'redirect' => '/cashier', 'change' => $r['change']]);
         }
@@ -126,7 +125,6 @@ final class CashierController
         $o = Orders::editable($req->param('id'));
         $plan = Orders::refundPlan($o);
         $amount = Orders::refund($o['id'], $req->str('method'), $req->bool('receipt'));
-        Notify::closeFor($o['id']);
         Flash::set('success', $plan['money'] > 0 ? I18n::t('pay.over_done', ['amount' => money($amount)]) : I18n::t('pay.over_done_acc', ['amount' => money($amount)]));
         Response::json(['ok' => true, 'redirect' => '/cashier']);
     }

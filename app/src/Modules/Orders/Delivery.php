@@ -164,6 +164,10 @@ final class Delivery
                 throw new \InvalidArgumentException('stage');
         }
         Db::save('orders', ['id' => $orderId, 'delivery' => $d]);
+        if ($to !== 'ready') {
+            // the bag left the pass — with the courier, or in the guest's hands: its plates are served and stop calling the till
+            \Sofrexa\Modules\Kitchen\Kitchen::served($orderId);
+        }
     }
 
     public static function assign(string $orderId, ?string $courierId): void

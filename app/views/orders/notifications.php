@@ -32,7 +32,8 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
   <?php foreach ($open as $n):
       $b = json_arr($n['body']);
       [$tone, $ic] = $kinds[$n['kind']] ?? ['info', 'bell'];
-      $where = (string) ($b['where'] ?? $n['title'] ?? '');
+      // the table the bill is at now: a bill moved since takes its alerts with it
+      $where = (string) ($n['place']['where'] ?? $b['where'] ?? $n['title'] ?? '');
       $head = t('notif.k.' . $n['kind'], ['where' => $where, 'what' => (string) ($b['what'] ?? '')]);
       $subText = match ($n['kind']) {
           'bill' => !empty($b['qr']) ? t('notif.bill_qr') : t('notif.bill_by', ['name' => first_name((string) ($b['by'] ?? ''))]),
@@ -71,6 +72,6 @@ $done = array_filter($rows, static fn(array $n): bool => (bool) $n['done_at']);
   <?php endforeach ?>
   <?php foreach ($done as $n):
       $b = json_arr($n['body']); ?>
-    <div class="nearlier"><?= icon('check-circle', 20) ?><span class="t-body-s c-muted"><?= e(t('notif.k.' . $n['kind'], ['where' => (string) ($b['where'] ?? $n['title'] ?? ''), 'what' => (string) ($b['what'] ?? '')]) . ' · ' . digits(date('H:i', intdiv((int) $n['done_at'], 1000)))) ?></span></div>
+    <div class="nearlier"><?= icon('check-circle', 20) ?><span class="t-body-s c-muted"><?= e(t('notif.k.' . $n['kind'], ['where' => (string) ($n['place']['where'] ?? $b['where'] ?? $n['title'] ?? ''), 'what' => (string) ($b['what'] ?? '')]) . ' · ' . digits(date('H:i', intdiv((int) $n['done_at'], 1000)))) ?></span></div>
   <?php endforeach ?>
 </div>

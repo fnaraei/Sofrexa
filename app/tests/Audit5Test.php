@@ -3,9 +3,14 @@
  * The fifth audit (2026-09-28, C01–C03), and the reason there was a fifth: each audit found a new combination of steps
  * the tests had not tried. So besides the three findings, this file plays long random sequences of kitchen and bill
  * steps and checks, after every single step, the rules that must always hold:
- *   - the waiter's ready alert of a bill lists exactly its plates that are ready and called, with their counts now;
- *   - no alert is left on a bill that is gone, or lists a plate that is on another bill;
- *   - a split or a merge leaves the open bills owing exactly what they owed.
+ *   - the ready alert of any bill — open, paid or cancelled — lists exactly its plates that are ready and called, with
+ *     their counts now, and no alert lists a plate that is on another bill;
+ *   - every other alert about a bill ends when the bill does (paid, cancelled, merged away);
+ *   - an alert shows where the bill is now (a bill moved to another table takes its alerts along);
+ *   - an alert for one person goes to the bill's waiter, on shift; what the till was asked stays with the till;
+ *   - a split or a merge leaves the open bills owing exactly what they owed, and the money on every bill adds up.
+ * The sixth audit (D01–D03) found steps the generator did not play: moving a table, cancelling a whole bill, take-away
+ * bills. It plays them now, with waiter changes, shifts ending, bill requests and waiter calls.
  */
 declare(strict_types=1);
 
@@ -13,6 +18,7 @@ use Sofrexa\Core\{App, Auth, Clock, Db, Migrator, Settings, Uuid};
 use Sofrexa\Modules\Kitchen\Kitchen;
 use Sofrexa\Modules\Menu\{Floor, Menu};
 use Sofrexa\Modules\Orders\{Accounts, Notify, Orders, Shifts};
+use Sofrexa\Modules\Staff\Staff;
 use Sofrexa\Setup\Seed;
 
 $setup = static function (int $tables = 2): array {
@@ -57,7 +63,8 @@ $alertOf = static fn(string $orderId): ?array => ($b = Db::value("SELECT body FR
 /** The rules that must hold after every step; returns what is wrong (empty when all is well). */
 $broken = static function () use ($alertOf): array {
     $wrong = [];
-    foreach (Db::rows("SELECT id FROM orders WHERE status IN ('open', 'billed') AND deleted = 0") as $o) {
+    // every bill, the ended ones too: a cancelled bill's plates must stop calling, a paid take-away's bag may still call
+    foreach (Db::rows('SELECT id FROM orders WHERE deleted = 0') as $o) {
         $called = Db::rows("SELECT id, qty FROM order_items WHERE order_id = ? AND status = 'ready' AND called_at IS NOT NULL AND deleted = 0", [$o['id']]);
         $want = array_column($called, 'id');
         sort($want);
@@ -75,9 +82,28 @@ $broken = static function () use ($alertOf): array {
             }
         }
     }
-    foreach (Db::rows("SELECT n.id, n.ref_id, n.body FROM notifications n JOIN orders o ON o.id = n.ref_id
-        WHERE n.kind = 'ready' AND n.done_at IS NULL AND n.deleted = 0 AND o.status NOT IN ('open', 'billed')") as $n) {
-        $wrong[] = 'an open alert on a bill that is gone';
+    foreach (Db::rows("SELECT n.kind FROM notifications n JOIN orders o ON o.id = n.ref_id WHERE n.ref_type = 'order'
+        AND n.kind <> 'ready' AND n.done_at IS NULL AND n.deleted = 0 AND o.status NOT IN ('pending', 'open', 'billed')") as $n) {
+        $wrong[] = 'an open "' . $n['kind'] . '" alert on a bill that has ended';
+    }
+    foreach (Db::rows("SELECT * FROM notifications WHERE ref_type IN ('order', 'order_item') AND done_at IS NULL AND deleted = 0") as $n) {
+        $o = Db::row('SELECT * FROM orders WHERE id = ' . ($n['ref_type'] === 'order' ? '?' : '(SELECT order_id FROM order_items WHERE id = ?)'), [$n['ref_id']]);
+        // where the bill is, worked out here and not by the code under test
+        $table = in_array($o['channel'], ['table', 'qr'], true);
+        $at = $table ? 'Masa ' . Db::value('SELECT number FROM tables WHERE id = ?', [$o['table_id']]) : 'Paket #' . $o['no'] . ($o['label'] ? ' · ' . $o['label'] : '');
+        $shown = Notify::place($n)['where'] ?? null;
+        if ($shown !== $at) {
+            $wrong[] = 'a "' . $n['kind'] . '" alert shows ' . $shown . ' for a bill at ' . $at;
+        }
+        if ($n['user_id'] !== null && ($n['user_id'] !== $o['waiter_id'] || Staff::offShift($n['user_id']))) {
+            $wrong[] = 'a "' . $n['kind'] . '" alert goes to someone who is not the bill’s waiter on shift';
+        }
+        if ($n['kind'] === 'ready' && $n['role'] !== ($table ? ($n['user_id'] ? null : 'waiter') : 'cashier')) {
+            $wrong[] = 'the ready alert of a ' . $o['channel'] . ' bill goes to ' . ($n['role'] ?? 'one waiter');
+        }
+        if ($n['kind'] === 'bill' && isset(json_arr($n['body'])['by']) && ($n['role'] !== 'cashier' || $n['user_id'] !== null)) {
+            $wrong[] = 'the till’s bill request went to a waiter';
+        }
     }
     // money: what a bill says it was paid is its payments; a closed bill was paid exactly, and sent everything it had
     foreach (Db::rows('SELECT id, status, total, paid, subtotal, discount FROM orders WHERE deleted = 0') as $o) {
@@ -178,6 +204,10 @@ return [
         foreach (range(1, (int) (getenv('SOFREXA_FUZZ') ?: 12)) as $seed) {
             $db = $seed > 1 ? $fresh() : null;
             $s = $setup(3);
+            $waiters = [Seed::user('Garson A', 'waiter', '2345'), Seed::user('Garson B', 'waiter', '3456')];
+            foreach ($waiters as $w) {
+                Staff::clockIn($w);
+            }
             mt_srand($seed);
             $orders = [];
             foreach ($s['tables'] as $t) {
@@ -187,14 +217,14 @@ return [
             for ($n = 0; $n < 150; $n++) {
                 $orders = array_column(Db::rows("SELECT id FROM orders WHERE status IN ('open', 'billed') AND deleted = 0"), 'id');
                 if (count($orders) < 2) {
-                    // bills get paid and merged away: new guests sit down so the steps go on
-                    $orders[] = Orders::create('table', ['table_id' => $pick($s['tables']), 'guests' => 2]);
+                    // bills get paid, cancelled and merged away: new guests sit down (or take away) so the steps go on
+                    $orders[] = mt_rand(0, 3) ? Orders::create('table', ['table_id' => $pick($s['tables']), 'guests' => 2]) : Orders::create('takeaway', ['label' => 'Paket']);
                 }
                 $o = $pick($orders);
                 $lines = Db::rows("SELECT id, status, round, station, qty FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$o]);
                 $live = array_values(array_filter($lines, static fn(array $l): bool => in_array($l['status'], ['sent', 'ready'], true)));
                 $l = $pick($live);
-                $step = mt_rand(0, 18);
+                $step = mt_rand(0, 24);
                 $bill = Db::row('SELECT total, paid FROM orders WHERE id = ?', [$o]);
                 $due = (int) $bill['total'] - (int) $bill['paid'];
                 $sum = (int) Db::value("SELECT COALESCE(SUM(total), 0) FROM orders WHERE status IN ('open', 'billed') AND deleted = 0");
@@ -284,6 +314,31 @@ return [
                         case 18:
                             if ($l && $l['status'] === 'ready') {
                                 Kitchen::served($o, [$l['id']]);
+                            }
+                            break;
+                        case 19:
+                            Orders::moveTable($o, $pick($s['tables'])); // refused for a take-away, or a busy table
+                            break;
+                        case 20:
+                            Orders::void($o, 'test'); // the whole bill (refused once something was paid)
+                            break;
+                        case 21:
+                            Orders::setWaiter($o, $pick($waiters));
+                            break;
+                        case 22:
+                            // a waiter's shift ends, or starts again
+                            $w = $pick($waiters);
+                            Staff::offShift($w) ? Staff::clockIn($w) : Staff::clockOut($w);
+                            break;
+                        case 23:
+                            // the waiter asks the till for the bill (as the table screen does)
+                            Notify::push('bill', ['where' => Orders::where(Orders::get($o)), 'by' => 'Patron'], null, 'cashier', $o);
+                            break;
+                        case 24:
+                            // the guests call their waiter
+                            $bill2 = Orders::get($o);
+                            if (in_array($bill2['channel'], ['table', 'qr'], true)) {
+                                Notify::toWaiter('call', $bill2, ['qr' => true]);
                             }
                             break;
                     }

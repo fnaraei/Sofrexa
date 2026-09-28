@@ -312,7 +312,11 @@ final class QrOrders
         });
         Orders::send($target, $lines);
         Orders::recalc($target);
-        Notify::closeFor($orderId, 'qr');
+        if ($target === $orderId) {
+            Notify::closeFor($orderId, 'qr'); // it is the table's bill now: only its "approve" alert is over
+        } else {
+            Orders::ended($orderId); // merged into the table's bill: the guest order is over
+        }
         Audit::log($userId ? 'order.qr_approve' : 'order.qr_direct', Orders::where($o) . ' · ' . \Sofrexa\Core\Money::fmt((int) $o['total'], false, 'tr'), 'order', $target);
         return $target;
     }
@@ -323,7 +327,7 @@ final class QrOrders
         $o = self::pendingOrder($orderId);
         $now = Clock::ms();
         Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => $now, 'intake_at' => $o['intake_at'] ?: $now]);
-        Notify::closeFor($orderId, 'qr');
+        Orders::ended($orderId);
         Audit::log('order.qr_reject', Orders::where($o) . ' · ' . \Sofrexa\Core\Money::fmt((int) $o['total'], false, 'tr'), 'order', $orderId);
     }
 

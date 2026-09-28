@@ -278,7 +278,7 @@ final class OnlineOrders
             throw new \InvalidArgumentException(I18n::t('qr.err_handled'));
         }
         Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim('iptal: ' . ($reason ?: 'reddedildi'))]);
-        Notify::closeFor($orderId);
+        Orders::ended($orderId);
         Audit::log('order.online_reject', Orders::where($o) . ' · ' . ($reason ?: '—'), 'order', $orderId);
         self::notices();
     }

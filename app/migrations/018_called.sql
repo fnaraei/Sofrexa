@@ -3,7 +3,14 @@
 -- split, a merge or a take-back without having to be kept in step by hand. A plate only tapped as plated on an
 -- unfinished ticket is ready but not called, and on no alert until "Hazır".
 ALTER TABLE order_items ADD COLUMN called_at INTEGER;
--- plates already carried out were called; ready ones on an alert were called when that alert came
+-- plates already carried out were called
 UPDATE order_items SET called_at = COALESCE(ready_at, served_at) WHERE status = 'served';
-UPDATE order_items SET called_at = COALESCE(ready_at, (SELECT n.at FROM notifications n WHERE n.kind = 'ready' AND n.ref_id = order_items.order_id ORDER BY n.at DESC LIMIT 1))
-WHERE status = 'ready' AND id IN (SELECT j.value FROM notifications n, json_each(n.body, '$.lines') j WHERE n.kind = 'ready');
+-- a ready plate was called only when an alert still open names it (decision 50). An alert that has ended is history,
+-- not a call: a plate taken back to the kitchen and plated again since was never called this time, and waits for
+-- "Hazır" like any other plated dish.
+UPDATE order_items SET called_at = COALESCE(ready_at, (SELECT MAX(n.at) FROM notifications n,
+        json_each(CASE WHEN json_valid(n.body) THEN n.body ELSE '{}' END, '$.lines') j
+    WHERE n.kind = 'ready' AND n.done_at IS NULL AND n.deleted = 0 AND j.value = order_items.id))
+WHERE status = 'ready' AND deleted = 0 AND EXISTS (SELECT 1 FROM notifications n,
+        json_each(CASE WHEN json_valid(n.body) THEN n.body ELSE '{}' END, '$.lines') j
+    WHERE n.kind = 'ready' AND n.done_at IS NULL AND n.deleted = 0 AND j.value = order_items.id);

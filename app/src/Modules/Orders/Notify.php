@@ -93,14 +93,15 @@ final class Notify
     }
 
     /**
-     * Someone else looks after an order now (a waiter change): its open alerts follow the bill, so the new waiter's
-     * phone rings for the plates and the old one's stops.
+     * Someone else looks after an order now (a waiter change): its open alerts for the waiter follow the bill, so the
+     * new waiter's phone rings for the plates and the old one's stops. What the till was asked (the bill printed, a
+     * take-away bag at the pass) stays with the till.
      */
     public static function follow(string $orderId, ?string $userId): void
     {
         $userId = self::recipient($userId);
         foreach (Db::rows("SELECT id FROM notifications WHERE ref_type = 'order' AND ref_id = ? AND done_at IS NULL AND deleted = 0
-            AND kind IN ('ready', 'qr', 'bill', 'call', 'served')", [$orderId]) as $n) {
+            AND kind IN ('ready', 'qr', 'bill', 'call', 'served') AND (user_id IS NOT NULL OR role = 'waiter')", [$orderId]) as $n) {
             Db::save('notifications', ['id' => $n['id'], 'user_id' => $userId, 'role' => $userId ? null : 'waiter', 'read_at' => null]);
         }
     }
@@ -135,7 +136,36 @@ final class Notify
     public static function forMe(int $limit = 50): array
     {
         [$where, $p] = self::mine();
-        return Db::rows("SELECT * FROM notifications WHERE deleted = 0 AND $where ORDER BY done_at IS NOT NULL, at DESC LIMIT $limit", $p);
+        $rows = Db::rows("SELECT * FROM notifications WHERE deleted = 0 AND $where ORDER BY done_at IS NOT NULL, at DESC LIMIT $limit", $p);
+        foreach ($rows as &$n) {
+            $n['place'] = self::place($n); // where the bill is now, not where it was when the alert was made
+        }
+        unset($n);
+        return $rows;
+    }
+
+    /**
+     * Where an alert's bill is now — "Masa 3" and its area — read from the bill itself, never from the copy kept in the
+     * alert: a bill moved to another table takes every one of its alerts with it (decision 50). Null for an alert that
+     * is not about a bill (a printer, say), which keeps the text it was made with.
+     * @return array{where:string, area:string}|null
+     */
+    public static function place(array $n): ?array
+    {
+        $orderId = match ($n['ref_type'] ?? null) {
+            'order' => $n['ref_id'],
+            'order_item' => Db::value('SELECT order_id FROM order_items WHERE id = ?', [$n['ref_id']]),
+            default => null,
+        };
+        if (!$orderId) {
+            return null;
+        }
+        $o = Db::row('SELECT o.id, o.channel, o.no, o.label, o.table_id, t.number AS table_no, a.name AS area_name, a.names AS area_names
+            FROM orders o LEFT JOIN tables t ON t.id = o.table_id LEFT JOIN areas a ON a.id = t.area_id WHERE o.id = ?', [$orderId]);
+        if (!$o) {
+            return null;
+        }
+        return ['where' => Orders::where($o), 'area' => $o['area_name'] ? tn(json_arr((string) $o['area_names']) ?: $o['area_name']) : ''];
     }
 
     /**
@@ -151,18 +181,19 @@ final class Notify
         [$where, $p] = self::mine();
         // a guest order to approve rings only for someone who may approve it
         $kinds = Auth::can('orders.qr_approve') ? self::ALERT_KINDS : array_values(array_diff(self::ALERT_KINDS, ['qr']));
-        $rows = Db::rows("SELECT id, kind, title, body, at FROM notifications WHERE deleted = 0 AND done_at IS NULL
+        $rows = Db::rows("SELECT id, kind, title, body, at, ref_type, ref_id FROM notifications WHERE deleted = 0 AND done_at IS NULL
             AND read_at IS NULL AND kind IN (" . Db::in($kinds) . ") AND $where ORDER BY at LIMIT $limit", [...$kinds, ...$p]);
         return array_map(static function (array $n): array {
             $b = json_arr($n['body']);
             $station = $b['station'] ?? null;
-            return ['id' => $n['id'], 'kind' => $n['kind'], 'where' => (string) ($b['where'] ?? $n['title'] ?? ''),
-                'area' => !empty($b['area']) ? tn($b['area']) : '',
+            $place = self::place($n) ?? ['where' => (string) ($b['where'] ?? $n['title'] ?? ''), 'area' => !empty($b['area']) ? tn($b['area']) : ''];
+            return ['id' => $n['id'], 'kind' => $n['kind'], 'where' => $place['where'], 'area' => $place['area'],
                 'station' => $station ? I18n::t('kds.st_' . $station) : '',
                 'items' => array_values(array_filter((array) ($b['items'] ?? []), 'is_array')),
-                // the plates on the card, and a version: the same alert with a new plate on it is shown again, and
-                // "Aldım" names the plates that were on the screen
-                'lines' => array_values(array_map('strval', (array) ($b['lines'] ?? []))), 'rev' => substr(md5((string) $n['body']), 0, 12),
+                // the plates on the card, and a version: the same alert with a new plate on it — or its bill moved to
+                // another table — is drawn again, and "Aldım" names the plates that were on the screen
+                'lines' => array_values(array_map('strval', (array) ($b['lines'] ?? []))),
+                'rev' => substr(md5($n['body'] . '|' . $place['where'] . '|' . $place['area']), 0, 12),
                 'what' => (string) ($b['what'] ?? ''), 'text' => (string) ($b['text'] ?? ''), 'at' => (int) $n['at']];
         }, $rows);
     }
@@ -215,10 +246,12 @@ final class Notify
         Db::save('notifications', ['id' => $id, 'read_at' => Clock::ms()]);
     }
 
-    /** Closes the open notifications of an order (paid, moved, handled at the till). */
-    public static function closeFor(string $orderId, ?string $kind = null): void
+    /** Closes the open notifications of an order (of one kind, or all but $except). A bill that ends goes through Orders::ended. */
+    public static function closeFor(string $orderId, ?string $kind = null, array $except = []): void
     {
-        $rows = Db::rows('SELECT id FROM notifications WHERE ref_type = ? AND ref_id = ? AND done_at IS NULL AND deleted = 0' . ($kind ? ' AND kind = ?' : ''), $kind ? ['order', $orderId, $kind] : ['order', $orderId]);
+        $rows = Db::rows('SELECT id FROM notifications WHERE ref_type = ? AND ref_id = ? AND done_at IS NULL AND deleted = 0'
+            . ($kind ? ' AND kind = ?' : '') . ($except ? ' AND kind NOT IN (' . Db::in($except) . ')' : ''),
+            ['order', $orderId, ...($kind ? [$kind] : []), ...$except]);
         foreach ($rows as $n) {
             self::done($n['id']);
         }

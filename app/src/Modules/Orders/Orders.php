@@ -497,6 +497,9 @@ final class Orders
     public static function moveTable(string $orderId, string $tableId): void
     {
         $o = self::editable($orderId);
+        if (!in_array($o['channel'], ['table', 'qr'], true)) {
+            throw new \InvalidArgumentException(I18n::t('order.err_not_table')); // a take-away or delivery has no table to leave
+        }
         $to = Db::value('SELECT number FROM tables WHERE id = ? AND deleted = 0', [$tableId]);
         if ($to === null) {
             throw new HttpError(404);
@@ -562,7 +565,7 @@ final class Orders
         });
         self::recalc($intoId);
         // plates waiting at the pass moved with their lines: their alert moves to the bill they are on now
-        \Sofrexa\Modules\Kitchen\Kitchen::retell($fromId);
+        self::ended($fromId);
         \Sofrexa\Modules\Kitchen\Kitchen::retell($intoId);
         Audit::log('order.merge', self::where($from) . ' → ' . self::where($into), 'order', $intoId);
     }
@@ -973,8 +976,8 @@ final class Orders
                 Db::save('order_items', ['id' => $l['id'], 'status' => 'served', 'served_at' => Clock::ms()]);
             }
             \Sofrexa\Modules\QrOrder\QrOrders::closeSessions(Db::value('SELECT table_id FROM orders WHERE id = ?', [$orderId]));
-            \Sofrexa\Modules\Kitchen\Kitchen::announce($orderId); // its plates were carried out: no alert left, whoever closed it
         }
+        self::ended($orderId); // a table's plates were carried out: no alert left, whoever closed it
         \Sofrexa\Modules\Customers\Loyalty::settle($orderId);
         \Sofrexa\Modules\Customers\Loyalty::earn($orderId);
     }
@@ -1012,7 +1015,21 @@ final class Orders
             self::askKitchen($o, $id);
         }
         \Sofrexa\Modules\QrOrder\QrOrders::closeSessions($o['table_id']);
+        self::ended($orderId); // its plates are cancelled: the pass has nothing left to hand over
         Audit::log('order.void', self::where($o) . ' · ' . Money::fmt((int) $o['total'], false, 'tr') . ' · sebep: ' . $reason, 'order', $orderId);
+    }
+
+    /**
+     * A bill has ended — paid, cancelled, merged into another, a guest order turned down — and every way of ending one
+     * comes here (decision 50). The alerts about the bill end with it: its bill request, a waiter call, a guest order
+     * to approve. "Food is ready" is about plates at the pass, not the bill: it is built again from them, so the plates
+     * of a cancelled bill stop ringing, a table's plates carried out at payment too, and a paid take-away's bag still
+     * waiting at the pass keeps calling the till until it is handed over.
+     */
+    public static function ended(string $orderId): void
+    {
+        Notify::closeFor($orderId, null, ['ready']);
+        \Sofrexa\Modules\Kitchen\Kitchen::announce($orderId);
     }
 
     // ------------------------------------------------------------ helpers

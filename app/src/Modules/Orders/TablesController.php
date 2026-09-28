@@ -159,8 +159,8 @@ final class TablesController
             }
             Orders::recalc($o['id']);
             \Sofrexa\Modules\QrOrder\QrOrders::closeSessions($o['table_id']);
+            Orders::ended($o['id']);
         }
-        Notify::closeFor($o['id']);
         Response::json(['ok' => true, 'message' => I18n::t('close.empty'), 'redirect' => '/tables']);
     }
 

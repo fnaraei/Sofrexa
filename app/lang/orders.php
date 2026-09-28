@@ -168,6 +168,7 @@ return [
     'order.err_soldout' => ['{name} tükendi', '{name} is sold out', '{name} تمام شده است', '{name} закончилось'],
     'order.err_stock' => ['{name}: yalnızca {n} kaldı', '{name}: only {n} left', '{name}: فقط {n} مانده', '{name}: осталось {n}'],
     'order.err_table_busy' => ['Bu masa dolu', 'That table is busy', 'این میز پر است', 'Этот стол занят'],
+    'order.err_not_table' => ['Bu hesap bir masaya ait değil', 'This bill is not at a table', 'این صورتحساب مال میزی نیست', 'Этот счёт не за столом'],
     'order.err_no_shift' => ['Kasa vardiyası kapalı — önce vardiyayı açın', 'The till shift is closed — open it first', 'شیفت صندوق بسته است — اول شیفت را باز کنید', 'Смена закрыта — сначала откройте её'],
     'order.err_split_paid' => ['Ödenen tutar kalan hesabı aşar; bu ürünler ayrılamaz', 'More was paid than would stay on this bill; these items can’t be split off', 'مبلغ پرداخت‌شده از باقی صورتحساب بیشتر می‌شود؛ این اقلام جدا نمی‌شوند', 'Оплачено больше, чем останется в счёте — эти позиции не отделить'],
     'order.err_voided' => ['Bu ürün zaten iptal edildi', 'This item is already voided', 'این قلم قبلاً لغو شده است', 'Эта позиция уже отменена'],
