@@ -91,3 +91,7 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 **Muhasebeci:** **Raporlar → Muhasebeciye gönder** → dönem ve içerik seç → Excel, PDF, CSV (.zip) indir veya e-postayla gönder.
 
 **Güvenlik:** kasa hareketleri, iptaller ve indirimler **Etkinlik kaydı**'nda; yedekler her gece otomatik alınır (**Ayarlar → Yedek**).
+
+**Acil durum:** kasa bilgisayarı bozulursa web adresine şifrenle gir → **Ayarlar → Senkron ve yedek → Acil durum modunu aç**. Personel restoranın internetinden PIN ile aynı adrese girer; yazıcı yoktur, mutfak ekranı kullanılır. Kasa bilgisayarı geri gelince mod kendiliğinden kapanır.
+
+**Online ve QR siparişler:** yeni online sipariş kasaya bildirim düşer; **Onayla** derken hazır olma süresi seçilir, müşteriye e-posta gider. QR'de her masanın ilk siparişini garson onaylar.

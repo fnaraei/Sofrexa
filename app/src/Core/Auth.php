@@ -151,7 +151,7 @@ final class Auth
     public static function pinAllowedFrom(string $ip): bool
     {
         $nets = [...(array) App::config('pin_networks', []), ...(array) Settings::get('security.pin_networks', [])];
-        if (!$nets) {
+        if (!$nets || \Sofrexa\Sync\Emergency::allows($ip)) {
             return true;
         }
         foreach ($nets as $cidr) {

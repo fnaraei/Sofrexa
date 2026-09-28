@@ -1623,3 +1623,8 @@ a.strow:hover { background: var(--bg-surface-2); }
   .online-auth .gapp, .online-track .gbar { max-width: 560px; margin: 0 auto; }
   .odesk-wrap.only-desktop { display: flex; }
 }
+
+/* ---------------------------------------------------------------- emergency mode (stage 13) */
+.emgbar { padding: 0 16px 12px; }
+.emglist { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; }
+@media (min-width: 1024px) { .emgbar { padding: 0 28px 12px; } }

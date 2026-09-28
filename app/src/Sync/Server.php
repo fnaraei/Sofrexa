@@ -16,6 +16,7 @@ final class Server
     {
         $body = (string) file_get_contents('php://input');
         Protocol::checkRequest($body);
+        Emergency::end('pc'); // the PC is back: it owns the orders again
         $in = json_decode($body, true) ?: [];
         $since = (int) ($in['since'] ?? 0);
         $outbox = Db::rows('SELECT seq, tbl, row_id FROM sync_outbox WHERE seq > ? ORDER BY seq LIMIT ' . Client::BATCH, [$since]);

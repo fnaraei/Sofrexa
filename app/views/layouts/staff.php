@@ -58,6 +58,7 @@ $lang = I18n::lang();
       <?php foreach ($appActions as $a) echo $a; ?>
     </header>
     <?php if (empty($noHead)): ?><?= Ui::pageHead($title ?? '', $sub, $headActions) ?><?php endif ?>
+    <?php if (\Sofrexa\Sync\Emergency::on()): ?><div class="emgbar"><?= Ui::banner(t('emg.banner_t'), t('emg.banner'), 'warning', 'alert') ?></div><?php endif ?>
     <?php foreach (\Sofrexa\Core\Flash::take() as [$type, $msg]): ?><?= Ui::banner($msg, '', $type === 'error' ? 'danger' : 'success', $type === 'error' ? 'alert' : 'check-circle') ?><?php endforeach ?>
     <div class="content">
       <?= $content ?>

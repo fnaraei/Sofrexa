@@ -47,7 +47,7 @@ final class QrOrders
     /** This copy takes guest orders in itself: the till PC, or a web copy that has no PC behind it. */
     public static function owner(): bool
     {
-        return App::isPc() || (string) App::config('sync.key', '') === '';
+        return App::isPc() || (string) App::config('sync.key', '') === '' || \Sofrexa\Sync\Emergency::on();
     }
 
     /** open · off (switched off in the settings) · offline (the web copy has not heard from the till for a while). */
@@ -56,7 +56,7 @@ final class QrOrders
         if (!Settings::get('qr.enabled', true)) {
             return 'off';
         }
-        if (App::isWeb() && \Sofrexa\Sync\Status::get()['state'] === 'offline') {
+        if (App::isWeb() && !\Sofrexa\Sync\Emergency::on() && \Sofrexa\Sync\Status::get()['state'] === 'offline') {
             return 'offline';
         }
         return 'open';

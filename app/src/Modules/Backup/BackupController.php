@@ -8,6 +8,17 @@ use Sofrexa\Core\{Auth, HttpError, I18n, Request, Response};
 /** SE7–SE9 actions. Taking and downloading backups needs backup.manage; restoring is for the manager role only. */
 final class BackupController
 {
+    /** Emergency mode on the web copy (the till PC is down): on / off. */
+    public function emergency(Request $req): void
+    {
+        if ($req->bool('on')) {
+            \Sofrexa\Sync\Emergency::start($req->ip());
+        } else {
+            \Sofrexa\Sync\Emergency::end();
+        }
+        Response::json(['ok' => true, 'message' => I18n::t($req->bool('on') ? 'emg.started' : 'emg.ended'), 'reload' => true]);
+    }
+
     public function create(Request $req): void
     {
         $file = Backup::create('manual');

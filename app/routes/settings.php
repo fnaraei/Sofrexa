@@ -14,6 +14,7 @@ $router->post('/settings/backup/create', [BackupController::class, 'create'], ['
 $router->get('/settings/backup/download/{file}', [BackupController::class, 'download'], ['perm' => 'backup.manage']);
 $router->post('/settings/backup/restore', [BackupController::class, 'restore'], ['perm' => 'backup.manage']);
 $router->post('/settings/backup/upload', [BackupController::class, 'upload'], ['perm' => 'backup.manage']);
+$router->post('/settings/emergency', [BackupController::class, 'emergency'], ['perm' => 'settings.manage']);
 
 $router->get('/settings/{section}', [SettingsController::class, 'section'], ['perm' => 'settings.manage']);
 $router->post('/settings/{section}', [SettingsController::class, 'save'], ['perm' => 'settings.manage']);

@@ -34,6 +34,7 @@ $restoreAttrs = static fn(array $b): array => [
 $isManager = (user()['role_code'] ?? '') === 'manager';
 ?>
 <?= \Sofrexa\Core\View::partial('settings/_sync_card', ['mobile' => false]) ?>
+<?php if (\Sofrexa\Core\App::isWeb()): ?><?= \Sofrexa\Core\View::partial('settings/_emergency') ?><?php endif ?>
 
 <!-- desktop: SE7 -->
 <section class="section only-desktop">

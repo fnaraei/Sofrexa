@@ -27,7 +27,7 @@ final class OnlineOrders
         if (!Settings::get('online.enabled', true) || (!Settings::get('online.delivery', true) && !Settings::get('online.pickup', true))) {
             return 'off';
         }
-        if (App::isWeb() && \Sofrexa\Sync\Status::get()['state'] === 'offline') {
+        if (App::isWeb() && !\Sofrexa\Sync\Emergency::on() && \Sofrexa\Sync\Status::get()['state'] === 'offline') {
             return 'offline';
         }
         return self::openNow() ? 'open' : 'closed';
