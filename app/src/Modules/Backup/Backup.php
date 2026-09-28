@@ -30,12 +30,29 @@ final class Backup
     /** @param string $kind auto | manual | safety */
     public static function create(string $kind = 'manual'): string
     {
+        $at = Clock::ms();
+        $zipPath = self::dir() . '/sofrexa-' . date('Ymd-His', intdiv($at, 1000)) . '-' . $kind . '.zip';
+        $manifest = self::export($zipPath, $kind);
+
+        $places = ['pc'];
+        $usb = trim((string) Settings::get('backup.usb_path', ''));
+        if ($usb !== '' && Settings::get('backup.usb', true) && is_dir($usb) && @copy($zipPath, rtrim($usb, '/\\') . '/' . basename($zipPath))) {
+            $places[] = 'usb';
+        }
+        self::writeMeta($zipPath, $manifest + ['size' => filesize($zipPath), 'places' => $places]);
+        if ($kind !== 'safety') {
+            Audit::log('backup.create', ($kind === 'auto' ? 'Otomatik' : 'Elle') . ' · ' . self::size((int) filesize($zipPath)) . ' · ' . strtoupper(implode(' · ', $places)), 'backup', basename($zipPath));
+        }
+        self::prune();
+        return $zipPath;
+    }
+
+    /** Writes a backup zip to $zipPath (also used for sync snapshots). Returns its manifest. */
+    public static function export(string $zipPath, string $kind): array
+    {
         $by = Auth::user();
         $at = Clock::ms();
-        $name = 'sofrexa-' . date('Ymd-His', intdiv($at, 1000)) . '-' . $kind;
-        $zipPath = self::dir() . '/' . $name . '.zip';
-        $tmpDb = self::dir() . '/' . $name . '.sqlite.tmp';
-
+        $tmpDb = $zipPath . '.sqlite.tmp';
         @unlink($tmpDb);
         Db::exec('VACUUM INTO ' . Db::pdo()->quote($tmpDb));
         $zip = new \ZipArchive();
@@ -68,18 +85,7 @@ final class Backup
         $zip->addFromString('manifest.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         $zip->close();
         @unlink($tmpDb);
-
-        $places = ['pc'];
-        $usb = trim((string) Settings::get('backup.usb_path', ''));
-        if ($usb !== '' && Settings::get('backup.usb', true) && is_dir($usb) && @copy($zipPath, rtrim($usb, '/\\') . '/' . basename($zipPath))) {
-            $places[] = 'usb';
-        }
-        self::writeMeta($zipPath, $manifest + ['size' => filesize($zipPath), 'places' => $places]);
-        if ($kind !== 'safety') {
-            Audit::log('backup.create', ($kind === 'auto' ? 'Otomatik' : 'Elle') . ' · ' . self::size((int) filesize($zipPath)) . ' · ' . strtoupper(implode(' · ', $places)), 'backup', basename($zipPath));
-        }
-        self::prune();
-        return $zipPath;
+        return $manifest;
     }
 
     /** Backups, newest first: file, at, kind, by, size, places. */
@@ -119,8 +125,11 @@ final class Backup
         return $n;
     }
 
-    /** Restores a backup zip (path). Returns the file name of the safety backup of the previous state. */
-    public static function restore(string $zipPath): string
+    /**
+     * Restores a backup zip (path). Returns the file name of the safety backup of the previous state.
+     * $epoch: the sync epoch to set afterwards (a new random one by default, so the web copy is re-seeded).
+     */
+    public static function restore(string $zipPath, bool $safetyFirst = true, ?string $epoch = null): string
     {
         if (!is_file($zipPath)) {
             throw new \InvalidArgumentException(I18n::t('err.not_found'));
@@ -135,7 +144,7 @@ final class Backup
             throw new \InvalidArgumentException(I18n::t('set.bk.bad_file'));
         }
         $actor = Auth::user();
-        $safety = self::create('safety');
+        $safety = $safetyFirst ? self::create('safety') : '';
 
         $tmp = self::dir() . '/restore-' . bin2hex(random_bytes(4)) . '.sqlite';
         file_put_contents($tmp, $zip->getFromName('db/sofrexa.sqlite'));
@@ -169,9 +178,11 @@ final class Backup
         // Newer migrations than the backup are re-applied; the web copy is told to take a fresh snapshot.
         \Sofrexa\Core\Migrator::run();
         Settings::flush();
-        Db::exec("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('epoch', ?)", [bin2hex(random_bytes(8))]);
-        Audit::log('backup.restore', date('d.m.Y H:i', intdiv((int) $manifest['created_at'], 1000)) . ' · ' . basename($zipPath), 'backup', basename($zipPath), ['safety' => basename($safety)], $actor);
-        return basename($safety);
+        Db::exec("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('epoch', ?)", [$epoch ?? bin2hex(random_bytes(8))]);
+        if ($safetyFirst) {
+            Audit::log('backup.restore', date('d.m.Y H:i', intdiv((int) $manifest['created_at'], 1000)) . ' · ' . basename($zipPath), 'backup', basename($zipPath), ['safety' => basename($safety)], $actor);
+        }
+        return $safety !== '' ? basename($safety) : '';
     }
 
     /** Deletes backups older than backup.keep_days (safety copies too), keeping at least the newest three. */

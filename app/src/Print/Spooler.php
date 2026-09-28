@@ -6,23 +6,27 @@ namespace Sofrexa\Print;
 use Sofrexa\Core\{App, Clock, Db, Uuid};
 
 /**
- * Print queue (print_jobs). Tickets are tried immediately; if the printer is off or out of paper the
- * job stays queued and the worker (bin/sofrexa print:worker --loop, started with Windows) retries it,
- * so no kitchen ticket is lost. Only the till PC prints: the web copy never creates jobs.
+ * Print queue (print_jobs). The worker (bin/sofrexa worker, started with Windows) prints queued tickets
+ * within a second and keeps retrying when a printer is off or out of paper, so no kitchen ticket is lost.
+ * Only the till PC prints: the web copy never creates jobs.
  */
 final class Spooler
 {
     public const MAX_ATTEMPTS = 20;
 
-    /** Queue a ticket and try to print it right away. Returns true when it printed. */
-    public static function print(string $printer, string $kind, string $bytes, ?string $refId = null): bool
+    /**
+     * Queue a ticket. The worker prints it within a second; web requests never wait for a printer
+     * (an unplugged printer would otherwise hold the single-threaded local server for seconds).
+     * $now = true prints inside this request (CLI and tests).
+     */
+    public static function print(string $printer, string $kind, string $bytes, ?string $refId = null, bool $now = false): bool
     {
         if (App::isWeb()) {
             return false;
         }
         $id = Uuid::v7();
         Db::insert('print_jobs', ['id' => $id, 'printer' => $printer, 'kind' => $kind, 'ref_id' => $refId, 'payload' => base64_encode($bytes), 'at' => Clock::ms()]);
-        return self::run(Db::row('SELECT * FROM print_jobs WHERE id = ?', [$id]));
+        return $now ? self::run(Db::row('SELECT * FROM print_jobs WHERE id = ?', [$id])) : true;
     }
 
     /** Worker pass: retries queued jobs oldest first. Returns the number printed. */

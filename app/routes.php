@@ -27,3 +27,9 @@ $router->get('/more', [HomeController::class, 'more']);
 foreach (glob(APP_DIR . '/routes/*.php') ?: [] as $file) {
     require $file;
 }
+
+// ------------------------------------------------------------------ own profile (every signed-in user)
+$router->get('/my', [Sofrexa\Modules\Me\MeController::class, 'index']);
+$router->post('/my/lang', [Sofrexa\Modules\Me\MeController::class, 'lang']);
+$router->post('/my/pin', [Sofrexa\Modules\Me\MeController::class, 'pin']);
+$router->post('/my/device', [Sofrexa\Modules\Me\MeController::class, 'device']);

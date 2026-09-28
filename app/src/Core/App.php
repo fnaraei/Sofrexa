@@ -55,7 +55,14 @@ final class App
     public static function storage(string $sub = ''): string
     {
         $base = rtrim((string) self::config('storage'), '/\\');
-        return $sub === '' ? $base : $base . '/' . $sub;
+        if ($sub === '') {
+            return $base;
+        }
+        $dir = $base . '/' . $sub;
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        return $dir;
     }
 
     public static function isPc(): bool

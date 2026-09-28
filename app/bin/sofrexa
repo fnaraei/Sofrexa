@@ -8,9 +8,11 @@
  *   php app/bin/sofrexa user:add "Name" manager 1234 [email] [password]
  *   php app/bin/sofrexa import:website <site.sqlite> <uploads-dir>   menu + photos from the restaurant website
  *   php app/bin/sofrexa serve [port]                  development server (PHP built-in)
- *   php app/bin/sofrexa backup | restore <file>
+ *   php app/bin/sofrexa backup | restore <file.zip>
+ *   php app/bin/sofrexa backup:decrypt <file.enc> <out.zip>   a nightly copy kept on the web copy
  *   php app/bin/sofrexa sync [--loop]                 PC → web copy replication
- *   php app/bin/sofrexa nightly                       tiers, recurring expenses, backup
+ *   php app/bin/sofrexa worker                        background process: printing, sync, nightly jobs
+ *   php app/bin/sofrexa nightly                       run the nightly jobs now (backup, housekeeping)
  *   php app/bin/sofrexa print:worker [--loop]         send queued tickets to the printers
  *   php app/bin/sofrexa test                          run the test suite
  */
@@ -58,24 +60,80 @@ try {
             $file = Sofrexa\Modules\Backup\Backup::create('manual-cli');
             $say("Backup written: $file");
             break;
+        case 'backup:decrypt':
+            // Disaster recovery: a nightly copy kept on the web copy (storage/backups/from-pc/*.enc) → .zip for "restore".
+            [$in, $out] = [$args[0] ?? '', $args[1] ?? ''];
+            if (!is_file($in) || $out === '') {
+                throw new InvalidArgumentException('usage: backup:decrypt <file.enc> <out.zip>  (needs the same sync.key)');
+            }
+            Sofrexa\Sync\Protocol::decryptFile($in, $out);
+            $say("Decrypted: $out");
+            break;
         case 'restore':
             $file = Sofrexa\Modules\Backup\Backup::restore($args[0] ?? '');
             $say("Restored. Safety copy of the previous state: $file");
             break;
         case 'sync':
             Migrator::run();
+            $loop = in_array('--loop', $args, true);
+            $wait = (int) Sofrexa\Core\App::config('sync.interval', 3);
             do {
-                $r = Sofrexa\Sync\Client::round();
-                $say(date('H:i:s') . ' ' . json_encode($r));
-                if (in_array('--loop', $args, true)) {
-                    sleep((int) Sofrexa\Core\App::config('sync.interval', 3));
+                try {
+                    $r = Sofrexa\Sync\Client::round();
+                    $say(date('H:i:s') . ' ' . json_encode($r));
+                    $pause = !empty($r['more']) ? 0 : $wait; // catch up quickly after an outage
+                } catch (Throwable $e) {
+                    if (!$loop) {
+                        throw $e;
+                    }
+                    Sofrexa\Core\App::log('sync', $e->getMessage());
+                    $say(date('H:i:s') . ' offline: ' . $e->getMessage());
+                    $pause = min(30, $wait * 3); // internet down: keep working locally, retry calmly
                 }
-            } while (in_array('--loop', $args, true));
+                if ($loop) {
+                    Sofrexa\Core\Db::disconnect(); // do not hold the database between rounds
+                    sleep($pause);
+                }
+            } while ($loop);
             break;
         case 'nightly':
             Migrator::run();
             Sofrexa\Setup\Nightly::run($say);
             break;
+        case 'worker':
+            // The one background process on the till PC (started with Windows):
+            // prints queued tickets (~0.7 s), syncs with the web copy (sync.interval) and runs the nightly jobs.
+            Migrator::run();
+            $interval = max(1, (int) Sofrexa\Core\App::config('sync.interval', 3));
+            $nextSync = 0.0;
+            $nextMinute = 0.0;
+            $say('Sofrexa worker started');
+            while (true) {
+                try {
+                    if ($n = Sofrexa\Print\Spooler::work()) {
+                        $say(date('H:i:s') . " printed $n");
+                    }
+                    if (microtime(true) >= $nextSync) {
+                        $r = Sofrexa\Sync\Client::round();
+                        $nextSync = microtime(true) + (!empty($r['more']) ? 0 : $interval);
+                    }
+                } catch (Throwable $e) {
+                    Sofrexa\Core\App::log('worker', $e->getMessage());
+                    $nextSync = microtime(true) + min(30, $interval * 3);
+                }
+                if (microtime(true) >= $nextMinute) {
+                    $nextMinute = microtime(true) + 60;
+                    try {
+                        if (Sofrexa\Setup\Nightly::due()) {
+                            Sofrexa\Setup\Nightly::run($say);
+                        }
+                    } catch (Throwable $e) {
+                        Sofrexa\Core\App::log('nightly', $e->getMessage());
+                    }
+                }
+                Sofrexa\Core\Db::disconnect();
+                usleep(700_000);
+            }
         case 'print:worker':
             Migrator::run();
             do {

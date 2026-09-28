@@ -19,6 +19,8 @@ It is **local-first**. The cashier PC runs the in-house server, so service never
 - **[docs/design-handoff.md](docs/design-handoff.md)** — tokens → CSS variables, components and layout rules. The build follows Figma exactly.
 - **[docs/figma-ids.json](docs/figma-ids.json)** — Figma page, component and variable-collection IDs.
 - **[docs/itkafe-schema.md](docs/itkafe-schema.md)** — map of the legacy ItKafe database, for the migration.
+- **[install/windows/README.md](install/windows/README.md)** — installing on the till PC (Persian).
+- **[docs/deploy-web.md](docs/deploy-web.md)** — setting up the web copy on the host (Persian).
 
 **Design (source of truth):** https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw
 
@@ -29,6 +31,10 @@ It is **local-first**. The cashier PC runs the in-house server, so service never
 | `brand/` | Sofrexa logo and mark, in dark and light versions |
 | `design/` | Overview image of each Figma page |
 | `docs/` | Screen index and implementation handoff |
+| `app/` | The application: PHP 8 + SQLite, no framework, no build step |
+| `app/bin/sofrexa` | Command line: migrate, seed, import, worker, sync, backup, restore, test |
+| `install/windows/` | Till PC installer (auto-start tasks, firewall, PHP setup) |
+| `tools/` | `build-assets.php` — CSS tokens and the icon sprite from `design/source` |
 
 ## Branding rule
 
@@ -41,4 +47,13 @@ Sofrexa is the platform; each restaurant is a tenant with its own name and logo.
 
 ## Status
 
-Design v1.1 is complete (100 screens, 36 components, 98 icons). Implementation has not started — see the status table in [PLAN.md](PLAN.md).
+Design v1.1 is complete (100 screens, 36 components, 98 icons). Stage 2 (foundation, security, infrastructure) is built — see the status table in [PLAN.md](PLAN.md).
+
+## Development
+
+```bash
+php app/bin/sofrexa seed --demo        # roles, tiers, demo staff and tables (needs 'debug' => true in app/config.php)
+php app/bin/sofrexa import:website <website.sqlite> <website uploads dir>
+php app/bin/sofrexa serve 8090         # http://127.0.0.1:8090
+php app/bin/sofrexa test
+```
