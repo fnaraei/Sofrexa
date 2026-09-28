@@ -1762,9 +1762,12 @@ a.strow:hover { background: var(--bg-surface-2); }
 .ralert__st { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px 9px 16px; border-radius: 999px; background: var(--bg-success-soft); color: var(--text-success); font: 800 16px/20px var(--font-ui); letter-spacing: .4px; }
 .ralert--qr .ralert__st { background: var(--bg-attention-soft); color: var(--text-attention); }
 .ralert__items { width: 100%; max-width: 350px; display: flex; flex-direction: column; gap: 12px; padding: 18px; border-radius: 18px; background: var(--bg-surface); color: var(--text-primary); }
+/* the dish names and the table come from the kitchen in Turkish, so let each line pick its own
+   direction from its first letter — otherwise "3 ürün" reads as "ürün 3" on a Persian phone */
+.ralert__where, .ralert__area, .ralert__st, .ralert__item span { unicode-bidi: plaintext; }
 .ralert__item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font: 700 24px/30px var(--font-ui); text-align: start; }
 .ralert__item + .ralert__item { padding-top: 12px; border-top: 1px solid var(--border-default); }
-.ralert__item b { font-weight: 800; color: var(--text-success); }
+.ralert__item b { font-weight: 800; color: var(--text-success); direction: ltr; unicode-bidi: isolate; }
 .ralert--qr .ralert__item b { color: var(--text-attention); }
 .ralert__ago { display: inline-flex; align-items: center; gap: 8px; font: 600 14px/18px var(--font-ui); opacity: .8; }
 .ralert__acts { width: 100%; max-width: 350px; display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding: 8px 0 calc(34px + env(safe-area-inset-bottom)); }
