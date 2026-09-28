@@ -55,8 +55,8 @@ final class Finance
                 'text' => trim(($d['supplier'] ?: t('fin.no_supplier')) . ($d['doc_no'] ? ' · ' . t('fin.invoice_no', ['no' => $d['doc_no']]) : ''), ' ·'),
                 'method' => $d['pay_method'] === 'cash' ? 'cash' : ($d['pay_method'] === 'card' ? 'card' : 'bank'), 'source' => 'stock', 'amount' => (int) $d['total'], 'receipt' => null, 'own' => false, 'fx' => null];
         }
-        // salaries and advances, one line per day and method
-        foreach (Db::rows("SELECT p.at, p.period, p.kind, p.method, p.total, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? ORDER BY p.at", [$from, $to]) as $p) {
+        // salaries and advances, one line per day and method (imported ItKafe accruals are not money that moved)
+        foreach (Db::rows("SELECT p.at, p.period, p.kind, p.method, p.total, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? AND p.kind <> 'accrual' ORDER BY p.at", [$from, $to]) as $p) {
             $day = date('Y-m-d', intdiv((int) $p['at'], 1000));
             $k = 'pay:' . $day . ':' . $p['method'] . ':' . $p['kind'];
             if (!isset($rows[$k])) {

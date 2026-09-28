@@ -97,7 +97,7 @@ final class Accountant
         }
         if (in_array('payroll', $parts, true)) {
             $rows = array_map(static fn(array $p): array => [date('d.m.Y', intdiv((int) $p['at'], 1000)), (string) $p['name'], $p['period'], $p['kind'] === 'advance' ? 'Avans' : 'Maaş / prim', self::method((string) $p['method']), $L((int) $p['total'])],
-                Db::rows('SELECT p.*, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? ORDER BY p.at', [$from, $to]));
+                Db::rows("SELECT p.*, u.name FROM payroll p LEFT JOIN users u ON u.id = p.user_id WHERE p.at >= ? AND p.at < ? AND p.kind <> 'accrual' ORDER BY p.at", [$from, $to]));
             $out['payroll'] = ['Personel ödemeleri', ['Tarih', 'Personel', 'Dönem', 'Tür', 'Ödeme', 'Tutar'], $rows, [5], [12, 24, 10, 14, 12, 14]];
         }
         if (in_array('expenses', $parts, true)) {

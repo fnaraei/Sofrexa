@@ -52,8 +52,10 @@ final class ItKafeSource
         exec($cmd, $lines, $code);
         @unlink($qfile);
         if ($code !== 0 || !is_file($out)) {
+            // sqlcmd writes its error into the -o file: keep it in the message before the file goes
+            $err = is_file($out) ? trim(mb_substr((string) file_get_contents($out), 0, 500)) : '';
             @unlink($out);
-            throw new \RuntimeException('sqlcmd failed (' . $code . '): ' . trim(implode(' ', $lines)) . ' — query: ' . mb_substr($sql, 0, 200));
+            throw new \RuntimeException('sqlcmd failed (' . $code . '): ' . trim(implode(' ', $lines) . ' ' . $err) . ' — query: ' . mb_substr($sql, 0, 200));
         }
         $h = fopen($out, 'rb');
         try {

@@ -15,6 +15,10 @@
  *   php app/bin/sofrexa nightly                       run the nightly jobs now (backup, housekeeping)
  *   php app/bin/sofrexa print:worker [--loop]         send queued tickets to the printers
  *   php app/bin/sofrexa test                          run the test suite
+ *   php app/bin/sofrexa import:itkafe --db=<target.sqlite> [--database=ItKafe] [--server=localhost\SQLEXPRESS] [--from=YYYY-MM-DD] [--append] [--tz=Europe/Istanbul]
+ *                                                     move the ItKafe history into a (new) Sofrexa database; repeatable on a fresh file
+ *                                                     (--tz: the old till PC's Windows time zone)
+ *   php app/bin/sofrexa import:itkafe:check --db=<target.sqlite> [--database=ItKafe]   control totals per month, ItKafe vs Sofrexa
  */
 declare(strict_types=1);
 
@@ -152,6 +156,28 @@ try {
                     usleep(700_000);
                 }
             } while (in_array('--loop', $args, true));
+            break;
+        case 'import:itkafe':
+        case 'import:itkafe:check':
+            $opt = [];
+            foreach ($args as $a) {
+                if (preg_match('/^--([a-z-]+)(?:=(.*))?$/', $a, $m)) {
+                    $opt[$m[1]] = $m[2] ?? true;
+                }
+            }
+            if (empty($opt['db']) || !is_string($opt['db'])) {
+                throw new RuntimeException('--db=<target.sqlite> is required (a new file for a test import)');
+            }
+            Sofrexa\Core\App::setConfig('db', $opt['db']);
+            Sofrexa\Core\Db::disconnect();
+            Migrator::run();
+            $src = new Sofrexa\Migrate\ItKafeSource((string) ($opt['server'] ?? 'localhost\SQLEXPRESS'), (string) ($opt['database'] ?? 'ItKafe'));
+            $imp = new Sofrexa\Migrate\ItKafeImport($src, $say);
+            if ($cmd === 'import:itkafe:check') {
+                $imp->check();
+            } else {
+                $imp->run(['from' => (string) ($opt['from'] ?? ''), 'append' => isset($opt['append']), 'tz' => (string) ($opt['tz'] ?? '')]);
+            }
             break;
         case 'test':
             exit(require __DIR__ . '/../tests/run.php');

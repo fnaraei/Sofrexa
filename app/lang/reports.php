@@ -304,6 +304,7 @@ return [
     'fin.src.stock' => ['Depo · oto', 'Stock · auto', 'انبار · خودکار', 'Склад · авто'],
     'fin.src.payroll' => ['Personel · oto', 'Payroll · auto', 'حقوق · خودکار', 'Зарплата · авто'],
     'fin.src.till' => ['Kasa · oto', 'Till · auto', 'صندوق · خودکار', 'Касса · авто'],
+    'fin.src.itkafe' => ['ItKafe', 'ItKafe', 'ItKafe', 'ItKafe'],
     'fin.no_supplier' => ['Tedarikçisiz alım', 'Purchase', 'خرید', 'Закупка'],
     'fin.invoice_no' => ['fatura #{no}', 'invoice #{no}', 'فاکتور #{no}', 'накл. №{no}'],
     'fin.pay_sal' => ['Maaş ve primler · {n} kişi', 'Salaries and bonuses · {n} people', 'حقوق و پورسانت · {n} نفر', 'Зарплаты и бонусы · {n} чел.'],
