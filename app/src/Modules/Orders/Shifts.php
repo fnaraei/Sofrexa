@@ -47,7 +47,7 @@ final class Shifts
     /**
      * Records a cash move. $kind: open | in | out | nosale | reverse. $amount is kuruş for TRY, units for foreign cash.
      */
-    public static function move(string $kind, string $currency, float $amount, string $reason, ?string $note = null, ?string $shiftId = null, ?string $reverses = null, ?string $photo = null): string
+    public static function move(string $kind, string $currency, float $amount, string $reason, ?string $note = null, ?string $shiftId = null, ?string $reverses = null, ?string $photo = null, ?string $ref = null): string
     {
         $shiftId ??= self::currentId();
         if (!$shiftId) {
@@ -68,7 +68,7 @@ final class Shifts
         }
         $sign = in_array($kind, ['out'], true) ? -1 : 1;
         $id = Db::append('cash_moves', ['shift_id' => $shiftId, 'kind' => $kind, 'currency' => $currency, 'amount_fx' => $sign * $fx, 'amount' => $sign * $try,
-            'reason' => mb_substr($reason, 0, 120), 'note' => $note !== null ? mb_substr($note, 0, 300) : null, 'photo' => $photo, 'reverses' => $reverses, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
+            'reason' => mb_substr($reason, 0, 120), 'note' => $note !== null ? mb_substr($note, 0, 300) : null, 'photo' => $photo, 'reverses' => $reverses, 'ref' => $ref, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
         if ($kind === 'in' || $kind === 'out') {
             Audit::log('cash.' . $kind, ($currency === 'TRY' ? Money::fmt($try, false, 'tr') : number_format($fx, 2, ',', '.') . ' ' . $currency) . ' · ' . $reason . ($note ? ' · ' . $note : ''), 'cash_move', $id);
         }

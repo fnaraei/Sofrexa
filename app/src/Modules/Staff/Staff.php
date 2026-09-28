@@ -386,10 +386,10 @@ final class Staff
                 if ($name === '') {
                     throw new HttpError(404);
                 }
-                Db::append('payroll', ['user_id' => (string) $uid, 'period' => $month, 'kind' => $kind, 'total' => $amount, 'method' => $method,
+                $pid = Db::append('payroll', ['user_id' => (string) $uid, 'period' => $month, 'kind' => $kind, 'total' => $amount, 'method' => $method,
                     'note' => mb_substr(trim($note), 0, 200) ?: null, 'at' => Clock::ms(), 'user_by' => $by]);
                 if ($method === 'cash') {
-                    Shifts::move('out', 'TRY', $amount, ($kind === 'advance' ? 'Avans' : 'Maaş') . ' · ' . $name, $note !== '' ? $note : null);
+                    Shifts::move('out', 'TRY', $amount, ($kind === 'advance' ? 'Avans' : 'Maaş') . ' · ' . $name, $note !== '' ? $note : null, null, null, null, 'payroll:' . $pid);
                 }
                 Audit::log('staff.pay', $name . ' · ' . Money::fmt($amount, false, 'tr') . ' · ' . $kind . ' · ' . $method . ' · ' . $month, 'user', (string) $uid);
             }

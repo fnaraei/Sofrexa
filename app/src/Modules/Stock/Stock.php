@@ -368,7 +368,7 @@ final class Stock
             }
             // paid from the till: the cash leaves the drawer
             if (($head['pay_method'] ?? '') === 'cash' && \Sofrexa\Modules\Orders\Shifts::currentId()) {
-                \Sofrexa\Modules\Orders\Shifts::move('out', 'TRY', $total, I18n::t('moves.r_supplier', [], 'tr'), trim($supplier . ' · ' . ($head['doc_no'] ?? ''), ' ·'));
+                \Sofrexa\Modules\Orders\Shifts::move('out', 'TRY', $total, I18n::t('moves.r_supplier', [], 'tr'), trim($supplier . ' · ' . ($head['doc_no'] ?? ''), ' ·'), null, null, null, 'stock_doc:' . $docId);
             }
         }
         return $docId;

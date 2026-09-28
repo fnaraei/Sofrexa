@@ -14,11 +14,7 @@ final class HomeController
         if (!Auth::can('reports.view')) {
             Response::redirect(Shell::home());
         }
-        if (class_exists(\Sofrexa\Modules\Reports\DashboardController::class)) {
-            (new \Sofrexa\Modules\Reports\DashboardController())->index($req);
-            return;
-        }
-        View::page('home/index', ['title' => I18n::t('nav.dashboard'), 'nav' => 'dashboard']);
+        (new \Sofrexa\Modules\Reports\DashboardController())->index($req);
     }
 
     /** Phone "More" tab: every section the user may open, as a list. */

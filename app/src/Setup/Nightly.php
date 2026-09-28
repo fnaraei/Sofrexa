@@ -10,7 +10,7 @@ use Sofrexa\Sync\Client;
 /**
  * Once-a-day jobs on the till PC, run by the worker at backup.hour (default 03:00, restaurant closed):
  * automatic backup (+ USB copy, + encrypted copy on the web copy), and housekeeping.
- * Loyalty: points expiry and the automatic tiers. Later stages add: recurring expenses.
+ * Loyalty (points expiry, automatic tiers) and the recurring expenses of the day.
  */
 final class Nightly
 {
@@ -49,6 +49,7 @@ final class Nightly
             }
         }
         $say('loyalty ' . \Sofrexa\Modules\Customers\Loyalty::nightly());
+        $say('recurring expenses booked ' . \Sofrexa\Modules\Finance\Finance::runRecurring());
         foreach (self::$jobs as $name => $job) {
             try {
                 $job($say);

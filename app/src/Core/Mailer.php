@@ -9,7 +9,8 @@ namespace Sofrexa\Core;
  */
 final class Mailer
 {
-    public static function send(string $to, string $subject, string $text, ?string $html = null): bool
+    /** @param array<string, string> $attachments file name => local path (sent as application/octet-stream or by extension) */
+    public static function send(string $to, string $subject, string $text, ?string $html = null, array $attachments = []): bool
     {
         $cfg = (array) App::config('mail', []);
         $from = (string) ($cfg['from'] ?? 'noreply@example.com');
@@ -31,6 +32,33 @@ final class Mailer
         } else {
             $headers['Content-Transfer-Encoding'] = 'base64';
             $body = chunk_split(base64_encode($text));
+        }
+
+        if ($attachments) {
+            // wrap the message in multipart/mixed with the files after it
+            $mixed = 'sfm' . bin2hex(random_bytes(8));
+            $inner = 'Content-Type: ' . $headers['Content-Type'] . "
+" . (isset($headers['Content-Transfer-Encoding']) ? 'Content-Transfer-Encoding: base64' . "
+" : '') . "
+" . $body;
+            unset($headers['Content-Transfer-Encoding']);
+            $headers['Content-Type'] = "multipart/mixed; boundary=\"$mixed\"";
+            $body = "--$mixed
+" . $inner . "
+";
+            $types = ['zip' => 'application/zip', 'pdf' => 'application/pdf', 'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'csv' => 'text/csv'];
+            foreach ($attachments as $name => $path) {
+                $type = $types[strtolower(pathinfo((string) $name, PATHINFO_EXTENSION))] ?? 'application/octet-stream';
+                $body .= "--$mixed
+Content-Type: $type; name=\"" . self::encode((string) $name) . "\"
+Content-Transfer-Encoding: base64
+"
+                    . 'Content-Disposition: attachment; filename="' . self::encode((string) $name) . "\"
+
+" . chunk_split(base64_encode((string) file_get_contents($path)));
+            }
+            $body .= "--$mixed--
+";
         }
 
         $driver = (string) ($cfg['driver'] ?? 'log');
