@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace Sofrexa\Modules\Orders;
 
-use Sofrexa\Core\{Auth, Clock, Db, HttpError, I18n, Request, Response, View};
-use Sofrexa\Modules\Menu\{Floor, Menu};
+use Sofrexa\Core\{Auth, Clock, Db, I18n, Request, Response, View};
+use Sofrexa\Modules\Menu\Menu;
 
 /** Order taking: W2 (phone menu), W10 (desktop menu + order panel), W3 (phone order summary), W4 (options sheet). */
 final class OrderController

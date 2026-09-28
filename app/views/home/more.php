@@ -12,4 +12,11 @@ $u = user();
     <?= Ui::lrow($label, ['icon' => $icon, 'href' => $href]) ?>
   <?php endforeach ?>
 </div>
+<?php if (can('cash.pay')): ?>
+<div class="list">
+  <?php if (can('cash.moves')): ?><?= Ui::lrow(t('cash.moves'), ['icon' => 'wallet', 'href' => '/cashier/moves']) ?><?php endif ?>
+  <?php if (can('cash.shift')): ?><?= Ui::lrow(t('cash.close_shift'), ['icon' => 'lock', 'href' => '/cashier/shift']) ?><?php endif ?>
+  <?php if (can('cash.rates')): ?><?= Ui::lrow(t('cash.rates'), ['icon' => 'currency', 'href' => '/cashier/rates']) ?><?php endif ?>
+</div>
+<?php endif ?>
 <form method="post" action="/logout"><?= csrf_field() ?><?= Ui::btn(t('ui.logout'), ['type' => 'submit', 'style' => 'secondary', 'icon' => 'logout', 'block' => true]) ?></form>

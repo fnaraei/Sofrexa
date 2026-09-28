@@ -369,8 +369,9 @@ final class Orders
      * Takes payments. $parts: [['method' => cash|card|account, 'currency' => TRY|GBP|USD|EUR, 'amount' => kuruş (TRY)
      * or 'amount_fx' => float for foreign cash], ...]. Cash over the due amount becomes change (in lira).
      * When the order is fully paid it closes and the receipt prints. Returns ['change' => kuruş, 'paid' => bool].
+     * $limit: pay only this much now (one guest's share); cash above it becomes that guest's change.
      */
-    public static function pay(string $orderId, array $parts, ?string $customerId = null, bool $receipt = true): array
+    public static function pay(string $orderId, array $parts, ?string $customerId = null, bool $receipt = true, ?int $limit = null): array
     {
         $o = self::editable($orderId);
         if ((int) $o['total'] <= 0 && !$o['lines']) {
@@ -381,6 +382,9 @@ final class Orders
             $o = self::get($orderId);
         }
         $due = max(0, (int) $o['total'] - (int) $o['paid']);
+        if ($limit !== null) {
+            $due = min($due, max(0, $limit));
+        }
         $shift = Shifts::currentId();
         $rates = Rates::latest();
         $change = 0;
@@ -417,6 +421,13 @@ final class Orders
         }
         if (!$rows) {
             throw new ValidationError(['amount' => I18n::t('order.err_amount')]);
+        }
+        // foreign cash of exactly the shown amount (rounded to the cent) may miss the lira total by a few kuruş
+        foreach (array_reverse(array_keys($rows)) as $i) {
+            if ($sum < $due && $rows[$i]['cur'] !== 'TRY' && $due - $sum <= (int) ceil($rows[$i]['rate'])) {
+                $rows[$i]['amount'] += $due - $sum;
+                $sum = $due;
+            }
         }
         if ($sum > $due) {
             // only cash can be given back; card or account over the due amount is refused

@@ -329,6 +329,8 @@ return [
     'shift.diff_t_m' => ['{diff} fark', '{diff} difference', '{diff} اختلاف', 'Разница {diff}'],
     'shift.diff_m' => ['Kapatmak için kısa bir açıklama yazın.', 'Write a short note to close.', 'برای بستن، توضیح کوتاهی بنویسید.', 'Для закрытия напишите короткое пояснение.'],
     'shift.note' => ['Açıklama', 'Note', 'توضیح', 'Пояснение'],
+    'js.shift_diff' => ['{cur} kasada {diff} fark var', '{cur} drawer is off by {diff}', 'صندوق {cur} {diff} اختلاف دارد', 'В кассе {cur} расхождение {diff}'],
+    'js.shift_diff_m' => ['{diff} fark', '{diff} difference', '{diff} اختلاف', 'Разница {diff}'],
     'shift.note_required' => ['Fark için açıklama yazın', 'Write a note for the difference', 'برای اختلاف توضیح بنویسید', 'Поясните разницу'],
     'shift.summary' => ['Özet', 'Summary', 'خلاصه', 'Итоги'],
     'shift.s_tables' => ['Masa hesapları', 'Table bills', 'صورتحساب میزها', 'Счета столов'],
@@ -411,6 +413,7 @@ return [
     'moves.reversed' => ['Ters kayıt yapıldı', 'Reversed', 'ثبت معکوس انجام شد', 'Сторно выполнено'],
     'moves.nosale_done' => ['Çekmece açıldı · kayda geçti', 'Drawer opened · logged', 'کشو باز شد · ثبت شد', 'Ящик открыт · записано'],
     'moves.err_reason' => ['Bir sebep seçin', 'Pick a reason', 'یک دلیل انتخاب کنید', 'Выберите причину'],
+    'err.upload' => ['Dosya yüklenemedi (JPG, PNG, WEBP veya PDF, en fazla 8 MB)', 'Could not upload (JPG, PNG, WEBP or PDF, up to 8 MB)', 'فایل بارگذاری نشد (JPG، PNG، WEBP یا PDF، حداکثر ۸ مگابایت)', 'Не удалось загрузить (JPG, PNG, WEBP или PDF, до 8 МБ)'],
 
     // ------------------------------------------------------------ delivery (C4, C5)
     'deliv.title' => ['Paket & teslimat', 'Takeaway & delivery', 'بیرون‌بر و پیک', 'Навынос и доставка'],

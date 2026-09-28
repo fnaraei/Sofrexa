@@ -157,9 +157,6 @@ final class Delivery
                 throw new \InvalidArgumentException('stage');
         }
         Db::save('orders', ['id' => $orderId, 'delivery' => $d]);
-        if ($to === 'way' && $o['channel'] === 'delivery') {
-            Tickets::courier($orderId);
-        }
     }
 
     public static function assign(string $orderId, ?string $courierId): void

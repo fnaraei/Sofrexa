@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 use Sofrexa\Core\{Auth, Clock, Db, Settings};
 use Sofrexa\Modules\Menu\{Floor, Menu};
-use Sofrexa\Modules\Orders\{Orders, Rates, Shifts};
+use Sofrexa\Modules\Customers\Customers;
+use Sofrexa\Modules\Orders\{Delivery, Notify, Orders, Rates, Shifts};
 use Sofrexa\Print\Printer;
 use Sofrexa\Setup\Seed;
 
@@ -83,6 +84,80 @@ return [
         same(1, $z);
         $zText = Printer::preview(base64_decode((string) Db::value("SELECT payload FROM print_jobs WHERE kind = 'z'")));
         check(str_contains($zText, 'GÜN SONU · Z #0001') && str_contains($zText, 'Kasa beklenen TL'), 'Z report');
+    },
+
+    'pay by guest: a share at a time, each guest gets their own change' => function () use ($setup): void {
+        ['adana' => $adana, 'table' => $table] = $setup();
+        Shifts::open(['TRY' => 0]);
+        $o = Orders::forTable($table, 3);
+        Orders::addItem($o, $adana, 3); // 2.610 → 870 each
+        $r = Orders::pay($o, [['method' => 'cash', 'currency' => 'TRY', 'amount' => 100000]], null, false, 87000);
+        same(13000, $r['change'], 'change of the first guest');
+        check(!$r['paid'], 'still open');
+        same(174000, $r['due']);
+        Orders::pay($o, [['method' => 'card', 'amount' => 87000]], null, false, 87000);
+        $r = Orders::pay($o, [['method' => 'cash', 'currency' => 'TRY', 'amount' => 87000]], null, false, 87000);
+        check($r['paid'], 'closed after the last share');
+    },
+
+    'foreign cash of exactly the shown amount closes the bill (cent rounding)' => function () use ($setup): void {
+        ['adana' => $adana, 'ayran' => $ayran, 'table' => $table] = $setup();
+        Shifts::open(['TRY' => 0]);
+        Rates::set('GBP', 42.80);
+        $o = Orders::forTable($table);
+        Orders::addItem($o, $adana, 2);
+        Orders::addItem($o, $ayran, 2);
+        Orders::discount($o, 'amount', 26400); // 1.840 − 264 = 1.576 → £36,82 (36,8224)
+        $r = Orders::pay($o, [['method' => 'cash', 'currency' => 'GBP', 'amount_fx' => 36.82]]);
+        check($r['paid'], 'paid');
+        same(0, $r['change']);
+        same(157600, (int) Db::value('SELECT SUM(amount) FROM payments WHERE order_id = ?', [$o]));
+    },
+
+    'phone delivery: new customer and address, courier out and back, settled into the shift' => function () use ($setup): void {
+        ['adana' => $adana, 'ayran' => $ayran] = $setup();
+        Shifts::open(['TRY' => 10000]);
+        $courier = Seed::user('Emre Kurye', 'courier', '6060');
+        $id = Delivery::create(['type' => 'delivery', 'phone' => '0533 412 77 90', 'name' => 'Ahmet Yılmaz', 'address' => 'Levent Mah. 12. Sk. No 4, Girne', 'address_label' => 'Ev',
+            'courier_id' => $courier, 'pay' => 'cash', 'cash_given' => '2000', 'note' => 'Zil çalışmıyor', 'items' => [['item_id' => $adana, 'qty' => 1], ['item_id' => $ayran, 'qty' => 2]]]);
+        $o = Orders::get($id);
+        same('delivery', $o['channel']);
+        same(97000, (int) $o['total']);
+        same('Levent Mah. 12. Sk. No 4, Girne', $o['delivery']['address']);
+        check((bool) Customers::byPhone('+90 533 412 7790'), 'customer found by the normalised phone');
+        same(0, (int) Db::value("SELECT COUNT(*) FROM order_items WHERE order_id = ? AND status = 'new'", [$id]), 'sent to the kitchen');
+        same(1, (int) Db::value("SELECT COUNT(*) FROM print_jobs WHERE kind = 'courier'"), 'courier slip');
+        Delivery::move($id, 'way');
+        Delivery::move($id, 'done');
+        $c = array_values(array_filter(Delivery::couriers(), static fn(array $x): bool => $x['id'] === $courier))[0];
+        same('₺970', Delivery::cashText($c['cash']));
+        same(1, Delivery::settle($courier));
+        same('paid', Db::value('SELECT status FROM orders WHERE id = ?', [$id]));
+        same($courier, Db::value('SELECT courier_id FROM payments WHERE order_id = ?', [$id]));
+        $sum = Shifts::summary(Shifts::currentId());
+        same(10000 + 97000, (int) $sum['cash']['TRY'], 'courier cash is in the drawer');
+    },
+
+    'shift totals count bills paid in the shift even when opened before it' => function () use ($setup): void {
+        ['adana' => $adana, 'table' => $table] = $setup();
+        $o = Orders::forTable($table);
+        Orders::addItem($o, $adana, 1);
+        Shifts::open(['TRY' => 0]);
+        Orders::pay($o, [['method' => 'card', 'amount' => 87000]]);
+        $sum = Shifts::summary(Shifts::currentId());
+        same(87000, (int) $sum['orders']['total']);
+        same(1, (int) $sum['orders']['n']);
+    },
+
+    'notifications: the till hears "ask for the bill", handled ones stop counting' => function () use ($setup): void {
+        ['adana' => $adana, 'table' => $table] = $setup();
+        $o = Orders::forTable($table);
+        Orders::addItem($o, $adana, 1);
+        $n = Notify::push('bill', ['where' => 'Masa 1', 'by' => 'Ayşe'], null, 'cashier', $o);
+        same($n, Notify::push('bill', ['where' => 'Masa 1', 'by' => 'Ayşe'], null, 'cashier', $o), 'one open alert per order and kind');
+        same(1, Notify::unread(), 'the manager hears the till');
+        Notify::done($n);
+        same(0, Notify::unread());
     },
 
     'split: pay part of a table separately' => function () use ($setup): void {

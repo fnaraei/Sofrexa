@@ -183,24 +183,30 @@ final class Tickets
         Spooler::print('courier', 'courier', $p->bytes(), $orderId);
     }
 
-    // ------------------------------------------------------------ P6 end of day
-    public static function zReport(string $shiftId): void
+    // ------------------------------------------------------------ P6 end of day (and the interim X report)
+    public static function xReport(string $shiftId): void
+    {
+        self::zReport($shiftId, true);
+    }
+
+    public static function zReport(string $shiftId, bool $interim = false): void
     {
         $s = Db::row('SELECT s.*, u.name FROM shifts s LEFT JOIN users u ON u.id = s.user_id WHERE s.id = ?', [$shiftId]);
         $sum = Shifts::summary($shiftId);
         $counted = json_arr($s['counted']);
         $p = self::paper('cashier');
         self::header($p);
-        $p->hr()->invert()->bold()->size(1, 2)->align('c')->text(' GÜN SONU · Z #' . str_pad((string) $s['z_no'], 4, '0', STR_PAD_LEFT) . ' ')->size()->invert(false)->bold(false)->align('l');
+        $p->hr()->invert()->bold()->size(1, 2)->align('c')->text($interim ? ' ARA RAPOR · X ' : ' GÜN SONU · Z #' . str_pad((string) $s['z_no'], 4, '0', STR_PAD_LEFT) . ' ')->size()->invert(false)->bold(false)->align('l');
         $p->pair(date('d.m.Y', intdiv((int) $s['opened_at'], 1000)), date('H:i', intdiv((int) $s['opened_at'], 1000)) . '-' . date('H:i', intdiv((int) ($s['closed_at'] ?: \Sofrexa\Core\Clock::ms()), 1000)));
         $p->pair('Kapatan', self::first((string) (\Sofrexa\Core\Auth::user()['name'] ?? $s['name'])));
         $p->hr();
-        $guests = (int) Db::value("SELECT COALESCE(SUM(guests), 0) FROM orders WHERE shift_id = ? AND status = 'paid'", [$shiftId]);
+        $paidIn = "SELECT order_id FROM payments WHERE shift_id = ? AND order_id IS NOT NULL";
+        $guests = (int) Db::value("SELECT COALESCE(SUM(guests), 0) FROM orders WHERE status = 'paid' AND id IN ($paidIn)", [$shiftId]);
         $gross = (int) $sum['orders']['total'] + (int) $sum['orders']['discount'];
         $p->pair('Hesap sayısı', (string) $sum['orders']['n'])->pair('Misafir', (string) $guests)->pair('Brüt satış', self::tl($gross))->pair('İndirim', '-' . self::tl((int) $sum['orders']['discount']));
         $p->bold()->pair('CİRO (KDV dahil)', self::tl((int) $sum['orders']['total']))->bold(false);
         foreach (Db::rows("SELECT l.vat_rate, SUM(ROUND(l.qty * (l.unit_price + l.mods_price) * (1.0 - CAST(o.discount AS REAL) / MAX(o.subtotal, 1)))) AS gross
-            FROM order_items l JOIN orders o ON o.id = l.order_id WHERE o.shift_id = ? AND o.status = 'paid' AND l.status <> 'void' AND l.deleted = 0 GROUP BY l.vat_rate", [$shiftId]) as $v) {
+            FROM order_items l JOIN orders o ON o.id = l.order_id WHERE o.status = 'paid' AND o.id IN ($paidIn) AND l.status <> 'void' AND l.deleted = 0 GROUP BY l.vat_rate", [$shiftId]) as $v) {
             if ((float) $v['vat_rate'] > 0) {
                 $p->pair('KDV %' . I18n::num((float) $v['vat_rate'], 0, 'tr'), self::tl(Money::vatOf((int) $v['gross'], (float) $v['vat_rate'])));
             }
@@ -223,8 +229,11 @@ final class Tickets
         }
         $expected = (int) $sum['cash']['TRY'];
         $count = (int) ($counted['TRY'] ?? 0);
-        $p->pair('Kasa beklenen TL', self::tl($expected))->pair('Kasa sayılan TL', self::tl($count))->bold()->pair('Fark', ($count - $expected < 0 ? '-' : '+') . self::tl(abs($count - $expected)))->bold(false);
-        foreach ($sum['cash'] as $cur => $exp) {
+        $p->pair('Kasa beklenen TL', self::tl($expected));
+        if (!$interim) {
+            $p->pair('Kasa sayılan TL', self::tl($count))->bold()->pair('Fark', ($count - $expected < 0 ? '-' : '+') . self::tl(abs($count - $expected)))->bold(false);
+        }
+        foreach ($interim ? [] : $sum['cash'] as $cur => $exp) {
             if ($cur !== 'TRY' && (abs((float) $exp) > 0.001 || isset($counted[$cur]))) {
                 $p->pair('Kasa ' . Money::symbol($cur) . ' beklenen / sayılan', number_format((float) $exp, 2, ',', '.') . ' / ' . number_format((float) ($counted[$cur] ?? 0), 2, ',', '.'));
             }
@@ -234,7 +243,7 @@ final class Tickets
             $p->text('Açıklama: ' . $note);
         }
         $p->feed(2)->cut();
-        Spooler::print('cashier', 'z', $p->bytes(), $shiftId);
+        Spooler::print('cashier', $interim ? 'x' : 'z', $p->bytes(), $shiftId);
     }
 
     public static function drawer(): void

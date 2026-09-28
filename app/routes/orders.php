@@ -1,7 +1,8 @@
 <?php
-/** Tables and order taking (W1–W11). @var Sofrexa\Core\Router $router */
+/** Tables, order taking and notifications (W1–W11). @var Sofrexa\Core\Router $router */
 declare(strict_types=1);
 
+use Sofrexa\Modules\Orders\NotifyController as N;
 use Sofrexa\Modules\Orders\OrderController as O;
 use Sofrexa\Modules\Orders\TablesController as T;
 
@@ -30,3 +31,8 @@ $router->post('/orders/{id}/guests', [T::class, 'guests'], $p);
 $router->post('/orders/{id}/waiter', [T::class, 'waiter'], $p);
 $router->post('/orders/{id}/bill', [T::class, 'requestBill'], $p);
 $router->post('/orders/{id}/close', [T::class, 'close'], $p);
+
+// Notifications (W6): every signed-in staff member sees their own.
+$router->get('/my/notifications', [N::class, 'index']);
+$router->post('/my/notifications/read', [N::class, 'readAll']);
+$router->post('/my/notifications/{id}/{act}', [N::class, 'act']);

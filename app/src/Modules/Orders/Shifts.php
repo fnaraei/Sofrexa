@@ -30,13 +30,16 @@ final class Shifts
         }
         $u = Auth::user();
         $try = (int) ($opening['TRY'] ?? 0);
-        $id = Db::save('shifts', ['user_id' => $u['id'] ?? null, 'device' => \Sofrexa\Core\Audit::device(), 'opened_at' => Clock::ms(), 'opening_cash' => $try,
-            'counted' => null, 'expected' => null, 'note' => json_encode(['opening' => $opening], JSON_UNESCAPED_UNICODE)]);
-        foreach ($opening as $cur => $amount) {
-            if ((float) $amount > 0) {
-                self::move('open', (string) $cur, (float) $amount, I18n::t('shift.opening', [], 'tr'), null, $id);
+        $id = Db::tx(static function () use ($u, $try, $opening): string {
+            $id = Db::save('shifts', ['user_id' => $u['id'] ?? null, 'device' => \Sofrexa\Core\Audit::device(), 'opened_at' => Clock::ms(), 'opening_cash' => $try,
+                'counted' => null, 'expected' => null, 'note' => json_encode(['opening' => $opening], JSON_UNESCAPED_UNICODE)]);
+            foreach ($opening as $cur => $amount) {
+                if ((float) $amount > 0) {
+                    self::move('open', (string) $cur, (float) $amount, I18n::t('shift.opening', [], 'tr'), null, $id);
+                }
             }
-        }
+            return $id;
+        });
         Audit::log('cash.open', Money::fmt($try, false, 'tr') . ' · vardiya açıldı', 'shift', $id);
         return $id;
     }
@@ -44,7 +47,7 @@ final class Shifts
     /**
      * Records a cash move. $kind: open | in | out | nosale | reverse. $amount is kuruş for TRY, units for foreign cash.
      */
-    public static function move(string $kind, string $currency, float $amount, string $reason, ?string $note = null, ?string $shiftId = null, ?string $reverses = null): string
+    public static function move(string $kind, string $currency, float $amount, string $reason, ?string $note = null, ?string $shiftId = null, ?string $reverses = null, ?string $photo = null): string
     {
         $shiftId ??= self::currentId();
         if (!$shiftId) {
@@ -56,15 +59,16 @@ final class Shifts
             $fx = 0.0;
         } else {
             $rate = Rates::latest()[$currency] ?? null;
-            if (!$rate) {
+            // foreign cash in the drawer at opening is only counted; in/out moves need today's rate for the lira value
+            if (!$rate && $kind !== 'open') {
                 throw new ValidationError(['currency' => I18n::t('order.err_rate', ['cur' => $currency])]);
             }
             $fx = round($amount, 2);
-            $try = Money::toTry($fx, $rate);
+            $try = $rate ? Money::toTry($fx, $rate) : 0;
         }
         $sign = in_array($kind, ['out'], true) ? -1 : 1;
         $id = Db::append('cash_moves', ['shift_id' => $shiftId, 'kind' => $kind, 'currency' => $currency, 'amount_fx' => $sign * $fx, 'amount' => $sign * $try,
-            'reason' => mb_substr($reason, 0, 120), 'note' => $note !== null ? mb_substr($note, 0, 300) : null, 'reverses' => $reverses, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
+            'reason' => mb_substr($reason, 0, 120), 'note' => $note !== null ? mb_substr($note, 0, 300) : null, 'photo' => $photo, 'reverses' => $reverses, 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
         if ($kind === 'in' || $kind === 'out') {
             Audit::log('cash.' . $kind, ($currency === 'TRY' ? Money::fmt($try, false, 'tr') : number_format($fx, 2, ',', '.') . ' ' . $currency) . ' · ' . $reason . ($note ? ' · ' . $note : ''), 'cash_move', $id);
         }
@@ -114,8 +118,12 @@ final class Shifts
             }
         }
         $methods = Db::pairs('SELECT method, SUM(amount) FROM payments WHERE shift_id = ? GROUP BY method', [$shiftId]);
-        $orders = Db::row("SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total, COALESCE(SUM(discount), 0) AS discount FROM orders WHERE shift_id = ? AND status = 'paid'", [$shiftId]);
-        $voids = Db::row("SELECT COUNT(*) AS n, COALESCE(SUM(ROUND(l.qty * (l.unit_price + l.mods_price))), 0) AS amount FROM order_items l JOIN orders o ON o.id = l.order_id WHERE o.shift_id = ? AND l.status = 'void' AND l.sent_at IS NOT NULL", [$shiftId]);
+        // bills closed in this shift (an order may have been opened before the shift started)
+        $orders = Db::row("SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total, COALESCE(SUM(discount), 0) AS discount FROM orders
+            WHERE status = 'paid' AND id IN (SELECT order_id FROM payments WHERE shift_id = ? AND order_id IS NOT NULL)", [$shiftId]);
+        $s = Db::row('SELECT opened_at, closed_at FROM shifts WHERE id = ?', [$shiftId]);
+        $voids = Db::row("SELECT COUNT(*) AS n, COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) AS amount FROM order_items
+            WHERE status = 'void' AND sent_at IS NOT NULL AND void_at >= ? AND void_at < ?", [(int) ($s['opened_at'] ?? 0), (int) ($s['closed_at'] ?: PHP_INT_MAX)]);
         $moves = Db::pairs("SELECT kind, SUM(amount) FROM cash_moves WHERE shift_id = ? AND currency = 'TRY' GROUP BY kind", [$shiftId]);
         return ['cash' => $cash, 'methods' => array_map('intval', $methods), 'orders' => $orders, 'voids' => $voids, 'moves' => array_map('intval', $moves)];
     }
