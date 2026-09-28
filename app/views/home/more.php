@@ -7,13 +7,17 @@ $u = user();
 <div class="card">
   <?= Ui::who($u['name'], t('role.' . $u['role_code']), 'm') ?>
 </div>
+<div class="list"><?= Ui::lrow(t('staff.my_shift'), ['icon' => 'clock', 'href' => '/my/shift']) ?></div>
 <div class="list">
   <?php foreach ($items as $key => [$label, $icon, $href]): ?>
     <?= Ui::lrow($label, ['icon' => $icon, 'href' => $href]) ?>
   <?php endforeach ?>
 </div>
-<?php if (can('customers.manage')): ?>
-<div class="list"><?= Ui::lrow(t('loy.title'), ['icon' => 'star', 'href' => '/customers/loyalty']) ?></div>
+<?php if (can('customers.manage') || can('staff.manage')): ?>
+<div class="list">
+  <?php if (can('staff.manage')): ?><?= Ui::lrow(t('pay2.title'), ['icon' => 'wallet', 'href' => '/staff/pay']) ?><?php endif ?>
+  <?php if (can('customers.manage')): ?><?= Ui::lrow(t('loy.title'), ['icon' => 'star', 'href' => '/customers/loyalty']) ?><?php endif ?>
+</div>
 <?php endif ?>
 <?php if (can('cash.pay')): ?>
 <div class="list">

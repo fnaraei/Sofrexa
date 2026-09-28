@@ -1240,3 +1240,45 @@ a.toprow:hover { background: var(--bg-surface-2); }
 @media print { .page-statement { background: #fff; } .stmt { padding: 0; max-width: none; } @page { margin: 14mm; } }
 .picklist button.pickrow { width: 100%; text-align: start; }
 .pickrow.is-danger .t-label-m { color: var(--text-danger); }
+
+/* ------------------------------------------------------------------ staff (ST1–ST4) */
+.strow { display: grid; grid-template-columns: minmax(0, 1fr) 110px 190px 170px 110px 90px; gap: 12px; align-items: center; min-height: 49px; padding: 10px 16px; border-top: 1px solid var(--border-default); }
+a.strow:hover { background: var(--bg-surface-2); }
+.strow--head { min-height: 0; border-top: 0; background: var(--bg-surface-2); font: 700 11px/14px var(--font-ui); letter-spacing: 1.1px; text-transform: uppercase; color: var(--text-muted); }
+.strow .badge { justify-self: start; }
+.staffedit { display: flex; flex-direction: column; gap: 12px; }
+.segs--scroll { overflow-x: auto; scrollbar-width: none; }
+.segs--scroll .seg { flex: 1 0 auto; padding-inline: 12px; }
+.grid2--keep { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.togglelist { padding: 4px 14px; gap: 0; }
+.togglelist .trow { gap: 10px; padding: 9px 0; min-height: 46px; }
+.togglelist .trow__text .t-body-m { color: var(--text-primary); }
+.prow { display: grid; grid-template-columns: 24px minmax(0, 1fr) 90px 150px 60px 100px 110px 100px 100px; gap: 12px; align-items: center; min-height: 43px; padding: 10px 16px; border-top: 1px solid var(--border-default); cursor: pointer; }
+.prow:hover { background: var(--bg-surface-2); }
+.prow:has(input:checked) { background: var(--bg-accent-soft); }
+.prow--head { min-height: 0; border-top: 0; background: var(--bg-surface-2); font: 700 11px/14px var(--font-ui); letter-spacing: 1.1px; text-transform: uppercase; color: var(--text-muted); cursor: default; }
+.prow--head:hover { background: var(--bg-surface-2); }
+.payrow { cursor: pointer; }
+.paylines { padding: 0 14px; gap: 0; }
+.payline { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-default); }
+.payline:last-child { border-bottom: 0; }
+.payline__in { width: 130px; flex: none; }
+.payline__in input { text-align: end; }
+.opts--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.myshift { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 8px; }
+.myshift > :not(.ring) { width: 100%; }
+.ring { width: 220px; height: 220px; flex: none; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center;
+  background: var(--bg-success-soft); box-shadow: inset 0 0 0 6px var(--border-success); }
+.ring .overline { color: var(--text-success); }
+.ring--off { background: var(--bg-surface-3); box-shadow: inset 0 0 0 6px var(--border-strong); }
+.ring--off .overline { color: var(--text-muted); }
+.ministats { display: flex; gap: 10px; }
+.ministat { flex: 1; min-width: 0; padding: 12px; gap: 2px; min-height: 68px; }
+.shiftlist { padding: 4px 14px; gap: 0; }
+.shiftrow { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-default); }
+@media (min-width: 1024px) {
+  .staffedit > :not(.page-head) { max-width: 640px; width: 100%; }
+  .myshift { max-width: 420px; margin: 0 auto; }
+  .page-myshift .actionbar { max-width: 420px; margin: 0 auto; width: 100%; }
+}
+.prow .check, .payrow .check { display: inline-block; vertical-align: middle; }

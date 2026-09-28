@@ -74,7 +74,7 @@ final class Audit
             $action === 'auth.logout' => ['audit.a.logout', 'neutral', 'logout'],
             in_array($action, ['auth.pin_failed', 'auth.password_failed'], true) => ['audit.a.login_failed', 'danger', 'alert'],
             str_starts_with($action, 'backup.') => [$action === 'backup.restore' ? 'audit.a.restore' : 'audit.a.backup', $action === 'backup.restore' ? 'danger' : 'info', 'history'],
-            str_starts_with($action, 'user.') || str_starts_with($action, 'role.') => ['audit.a.users', $action === 'user.delete' ? 'danger' : 'info', 'users'],
+            str_starts_with($action, 'user.') || str_starts_with($action, 'role.') || str_starts_with($action, 'staff.') => ['audit.a.users', $action === 'user.delete' ? 'danger' : 'info', 'users'],
             str_starts_with($action, 'settings.') => ['audit.a.settings', 'info', 'settings'],
             str_starts_with($action, 'menu.') => ['audit.a.menu', 'info', 'utensils'],
             str_starts_with($action, 'stock.') => ['audit.a.stock', 'neutral', 'box'],
