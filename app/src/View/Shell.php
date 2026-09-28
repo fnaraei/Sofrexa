@@ -58,6 +58,14 @@ final class Shell
         return $out;
     }
 
+    /** Attention dot on the "Depo" tab (R1): an active raw item under its minimum. */
+    public static function stockAlert(): bool
+    {
+        static $v = null;
+        return $v ??= (bool) \Sofrexa\Core\Db::value("SELECT 1 FROM stock_items s WHERE s.deleted = 0 AND s.active = 1 AND s.kind = 'raw' AND s.min_qty > 0
+            AND (SELECT COALESCE(SUM(m.qty), 0) FROM stock_moves m WHERE m.stock_item_id = s.id) < s.min_qty LIMIT 1");
+    }
+
     public static function tabSet(): ?array
     {
         $u = Auth::user();

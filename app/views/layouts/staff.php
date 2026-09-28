@@ -66,7 +66,7 @@ $lang = I18n::lang();
     <?php if ($tabs): ?>
     <nav class="tabbar" aria-label="<?= e(t('nav.aria')) ?>">
       <?php foreach ($tabs as $key => [$label, $icon, $href]): ?>
-        <a class="tab<?= $key === $tab ? ' is-active' : '' ?>" href="<?= e($href) ?>"><span class="tab__pill"><?= icon($icon, 22) ?><?php if ($key === 'notifications'): ?><i class="tab__dot" data-notif-dot hidden></i><?php endif ?></span><span class="tab__label"><?= e(t($label)) ?></span></a>
+        <a class="tab<?= $key === $tab ? ' is-active' : '' ?>" href="<?= e($href) ?>"><span class="tab__pill"><?= icon($icon, 22) ?><?php if ($key === 'notifications'): ?><i class="tab__dot" data-notif-dot hidden></i><?php elseif ($key === 'stock' && Shell::stockAlert()): ?><i class="tab__dot"></i><?php endif ?></span><span class="tab__label"><?= e(t($label)) ?></span></a>
       <?php endforeach ?>
     </nav>
     <?php endif ?>
