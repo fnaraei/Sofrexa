@@ -5,7 +5,7 @@ namespace Sofrexa\Modules\QrOrder;
 
 use Sofrexa\Core\{App, Audit, Clock, Db, I18n, RateLimit, Settings};
 use Sofrexa\Modules\Menu\Menu;
-use Sofrexa\Modules\Orders\{Notify, Orders};
+use Sofrexa\Modules\Orders\{Assign, Notify, Orders};
 
 /**
  * QR ordering at the table (PLAN §5.10, Figma Q1–Q4 and W5).
@@ -248,14 +248,18 @@ final class QrOrders
         return $n;
     }
 
-    /** "QR order waiting" for the waiter of the table's bill (every waiter when the table is not open yet). */
+    /**
+     * "QR order waiting" for the waiter of the table's bill. A table nobody owns yet is shared out among the
+     * waiters on shift (Assign), so the orders do not all land on whoever looks at their phone first.
+     */
     private static function alert(string $orderId): void
     {
         $o = Orders::get($orderId);
         $main = self::mainOrder($o['table_id'], $orderId);
+        $waiter = $main['waiter_id'] ?? Assign::toWaiter($orderId);
         $lines = array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'void');
         Notify::push('qr', ['where' => Orders::where($o), 'what' => I18n::t('qr.n_items', ['n' => count($lines)], 'tr') . ' · ' . \Sofrexa\Core\Money::fmt((int) $o['total'], false, 'tr')],
-            $main['waiter_id'] ?? null, 'waiter', $orderId);
+            $waiter, 'waiter', $orderId);
     }
 
     /** The table's own bill (open or billed), not a guest order waiting for approval. */
@@ -279,7 +283,9 @@ final class QrOrders
         $o = self::pendingOrder($orderId);
         $now = Clock::ms();
         $lines = array_column(Db::rows("SELECT id FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId]), 'id');
-        $target = Db::tx(static function () use ($o, $userId, $now, $lines): string {
+        // the waiter who approved, the one the order was shared out to, or — when neither — the least busy on shift
+        $pick = $userId ?: ($o['waiter_id'] ?: Assign::pick());
+        $target = Db::tx(static function () use ($o, $userId, $now, $lines, $pick): string {
             if ($userId && $o['qr_session_id'] && ($s = Db::row('SELECT approved_at, devices FROM qr_sessions WHERE id = ?', [$o['qr_session_id']]))) {
                 // the waiter saw this phone's order: the phone may order on its own from now on
                 $devices = json_arr((string) $s['devices']);
@@ -292,7 +298,8 @@ final class QrOrders
             $stamp = ['id' => $o['id'], 'intake_at' => $o['intake_at'] ?: $now, 'approved_at' => $now, 'approved_by' => $userId];
             $main = self::mainOrder((string) $o['table_id'], $o['id']);
             if (!$main) {
-                Db::save('orders', $stamp + ['status' => 'open', 'waiter_id' => $userId ?? $o['waiter_id']]);
+                Db::save('orders', $stamp + ['status' => 'open', 'waiter_id' => $pick]
+                    + ($pick && !$o['assigned_at'] ? ['assigned_at' => $now] : []));
                 return $o['id'];
             }
             foreach ($lines as $id) {

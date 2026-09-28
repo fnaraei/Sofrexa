@@ -14,8 +14,11 @@ Her rol için bir sayfa. Yazdırıp ilgili istasyonun yanına asılabilir. Ekran
 3. **Mutfağa gönder**. Gönderilen ürün mutfak ekranına ve yazıcısına düşer.
 
 **Servis sırasında**
+- **Yemek hazır olunca telefonun çalar:** ekranı kaplayan yeşil bir uyarı masayı, bölümü ve hazır olan ürünleri gösterir. Gitmek üzereysen **Aldım**, şimdi gidemiyorsan **Sonra** (ses susar, uyarı Bildirimler'de kalır). Ses cevap verene kadar tekrarlanır.
+- Bunun çalışması için **uygulama telefonda açık kalmalı**. Uygulama açıkken ekran kendiliğinden kararmaz. Sesi ilk kez açmak için vardiya başında ekrana bir kez dokunman yeterli — tarayıcı dokunmadan ses çalmaz.
 - Zil (**Bildirimler**): mutfakta hazır olan ürün, QR siparişi onayı, hesap isteği.
 - Hazır ürünü götürdükten sonra bildirimde **Servis edildi**.
+- **QR siparişleri vardiyadaki garsonlara paylaştırılır:** masanın garsonu yoksa sipariş, elinde en az iş olana gider (henüz götürülmemiş hazır tabaklar ve açık masalar sayılır). Yük eşitse sırası geleni alır. Yani her sipariş aynı kişiye düşmez.
 - Masa taşıma, birleştirme, bölme, misafir sayısı ve garson değiştirme: masanın **⋯** menüsü.
 - Gönderilmiş ürünü iptal etmek için sebep seçmek zorunludur; yetkin yoksa kasaya haber ver.
 

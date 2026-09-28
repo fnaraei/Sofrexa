@@ -242,6 +242,110 @@
     if (box) box.classList.toggle('is-changed', e.target.value !== e.target.defaultValue);
   });
 
+  /* ------------------------------------------------------------ "food is ready" alert (W12)
+     Waiters carry their own phones, so the alert rings there rather than at the till: a full-screen card
+     and a chime that repeats until they answer. A browser only plays sound after a tap, so the first tap
+     anywhere unlocks it, and a screen wake lock keeps the phone awake while the app is in front. */
+  const serves = !!(S.user && S.user.serves);
+  const Ring = {
+    ctx: null, lock: null, open: null, timer: null, left: 0,
+    on() { try { return localStorage.getItem('sfx-alert') !== 'off'; } catch (e) { return true; } },
+    unlock() {
+      try {
+        this.ctx = this.ctx || new (window.AudioContext || window.webkitAudioContext)();
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+      } catch (e) { /* no audio on this device */ }
+    },
+    /** Four rising notes, louder than the kitchen's: it has to carry across a full room. */
+    chime() {
+      if (!this.on()) return;
+      this.unlock();
+      const c = this.ctx;
+      if (!c) return;
+      try {
+        [[0, 784], [0.2, 1047], [0.4, 1319], [0.62, 1319]].forEach(function (n) {
+          const o = c.createOscillator(), g = c.createGain(), at = c.currentTime + n[0];
+          o.type = 'triangle';
+          o.frequency.value = n[1];
+          g.gain.setValueAtTime(0.0001, at);
+          g.gain.exponentialRampToValueAtTime(0.8, at + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+          o.connect(g).connect(c.destination);
+          o.start(at);
+          o.stop(at + 0.22);
+        });
+      } catch (e) { /* no audio on this device */ }
+      try { if (navigator.vibrate) navigator.vibrate([150, 80, 150, 80, 250]); } catch (e) { /* no vibration */ }
+    },
+    async wake() {
+      if (!serves || !('wakeLock' in navigator) || document.hidden || this.lock) return;
+      try {
+        this.lock = await navigator.wakeLock.request('screen');
+        this.lock.addEventListener('release', () => { this.lock = null; });
+      } catch (e) { /* the browser said no; the phone just dims as usual */ }
+    },
+    /** The alerts the server sent: ring about the oldest one, and drop the card once it is handled. */
+    sync(list) {
+      const a = list[0];
+      if (!a) return this.close();
+      if (a.id !== this.open) this.show(a);
+    },
+    show(a) {
+      this.close();
+      this.open = a.id;
+      const ready = a.kind !== 'qr';
+      const mins = Math.floor((Date.now() - a.at) / 60000);
+      const rows = (a.items || []).map(i =>
+        // the quantity is already formatted for the reader ("1,5"), so compare it as text
+        '<li class="ralert__item"><span>' + S.esc(i.name) + '</span><b>' + (i.qty && i.qty !== '1' ? '×' + S.digits(i.qty) : '') + '</b></li>').join('');
+      const el = document.createElement('div');
+      el.className = 'ralert' + (ready ? '' : ' ralert--qr');
+      el.innerHTML = '<div class="ralert__card" role="alertdialog" aria-live="assertive">'
+        + '<span class="ralert__ic">' + S.icon(ready ? 'bell' : 'qr', 64) + '</span>'
+        + '<div class="ralert__where">' + S.esc(a.where) + '</div>'
+        + (a.area ? '<div class="ralert__area">' + S.esc(a.area) + '</div>' : '')
+        + (a.station ? '<span class="ralert__st">' + S.icon('chef-hat', 20) + S.esc(a.station) + '</span>' : '')
+        + (rows ? '<ul class="ralert__items">' + rows + '</ul>' : (a.what ? '<ul class="ralert__items"><li class="ralert__item"><span>' + S.esc(a.what) + '</span></li></ul>' : ''))
+        + '<div class="ralert__ago">' + S.icon('clock', 20) + S.esc(mins < 1 ? S.tr('js.ring_now') : S.tr('js.ring_ago', { n: S.digits(mins) })) + '</div>'
+        + '<div class="ralert__acts">'
+        + '<button class="ralert__go" type="button" data-ralert="done">' + S.icon('check', 20) + S.esc(S.tr(ready ? 'js.ring_got' : 'js.ring_review')) + '</button>'
+        + '<button class="ralert__later" type="button" data-ralert="later">' + S.esc(S.tr('js.ring_later')) + '</button>'
+        + '</div></div>';
+      document.body.appendChild(el);
+      this.el = el;
+      this.left = 20; // about three minutes of ringing, then the card waits quietly
+      this.chime();
+      this.timer = setInterval(() => { if (--this.left > 0) this.chime(); else this.stop(); }, 8000);
+      this.wake();
+    },
+    stop() { if (this.timer) { clearInterval(this.timer); this.timer = null; } },
+    close() {
+      this.stop();
+      if (this.el) { this.el.remove(); this.el = null; }
+      this.open = null;
+    },
+    /**
+     * "Aldım": the waiter is going for the plates, so the alert is handled and the card goes.
+     * "Sonra": seen but not done — it stops ringing and stays on the notifications page.
+     * A guest order has to be looked at, so "Gözden geçir" opens the notifications page instead.
+     */
+    async answer(act) {
+      const id = this.open;
+      if (!id) return;
+      const review = act === 'done' && this.el && this.el.classList.contains('ralert--qr');
+      this.close();
+      try { await S.api('/my/notifications/' + id + '/' + (act === 'done' && !review ? 'done' : 'later'), {}, { quiet: true }); } catch (e) { /* the next poll tries again */ }
+      if (review) { location.href = '/my/notifications'; return; }
+      pollStatus();
+    },
+  };
+  document.addEventListener('pointerdown', () => Ring.unlock(), { once: true });
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-ralert]');
+    if (b) Ring.answer(b.dataset.ralert);
+  });
+  if (serves) { Ring.wake(); }
+
   /* ------------------------------------------------------------ sync indicator */
   const syncLabels = { online: 'cloud-check', syncing: 'refresh', offline: 'wifi-off' };
   S.setSync = function (state, label) {
@@ -251,7 +355,8 @@
     });
   };
   async function pollStatus() {
-    if (!S.user || document.hidden) return;
+    // a waiter keeps asking even behind another tab, so a ready plate still rings
+    if (!S.user || (document.hidden && !serves)) return;
     try {
       const r = await S.api('/api/status', undefined, { quiet: true });
       S.setSync(r.sync.state, r.sync.label);
@@ -259,14 +364,16 @@
       const dot = S.$('[data-notif-dot]');
       if (dot) dot.hidden = !r.unread;
       S.$$('[data-offline-banner]').forEach(b => { b.hidden = r.sync.state !== 'offline'; });
+      if (serves) Ring.sync(r.alerts || []);
       document.dispatchEvent(new CustomEvent('status', { detail: r }));
     } catch (e) {
       if (e.message !== 'auth') S.setSync('offline', S.tr('js.offline'));
     }
   }
   if (S.user) {
-    setInterval(pollStatus, 15000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) pollStatus(); });
+    // a waiter's phone asks more often: a plate the kitchen has made should not sit under the lamp
+    setInterval(pollStatus, serves ? 5000 : 15000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollStatus(); Ring.wake(); } });
   }
 
   /* ------------------------------------------------------------ idle lock (shared devices) */

@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Sofrexa\Modules\Orders;
 
-use Sofrexa\Core\{Auth, Clock, Db};
+use Sofrexa\Core\{Auth, Clock, Db, I18n};
 
 /**
  * Staff notifications (W6): food ready, QR order to approve, bill requested, waiter called.
@@ -13,6 +13,9 @@ use Sofrexa\Core\{Auth, Clock, Db};
 final class Notify
 {
     public const KINDS = ['ready', 'qr', 'bill', 'call', 'served', 'online', 'void', 'printer'];
+
+    /** Kinds the phone rings about (W12): plates going cold, and a guest order nobody has looked at. */
+    public const ALERT_KINDS = ['ready', 'qr'];
 
     /**
      * A notification about one order line (a cancelled dish the till decides on). It is not closed with its bill:
@@ -42,6 +45,10 @@ final class Notify
                 $params['lines'] = array_values(array_unique(array_merge((array) $prev['lines'], (array) $params['lines'])));
                 $params['what'] = trim(($prev['what'] ?? '') . ', ' . ($params['what'] ?? ''), ', ');
                 $params['text'] = trim(($prev['text'] ?? '') . ', ' . ($params['text'] ?? ''), ', ');
+                $params['items'] = array_merge((array) ($prev['items'] ?? []), (array) ($params['items'] ?? []));
+                if (($prev['station'] ?? null) !== ($params['station'] ?? null)) {
+                    $params['station'] = null; // the kitchen and the bar both have something: no single badge fits
+                }
             }
             Db::save('notifications', ['id' => $old['id'], 'body' => $params, 'at' => Clock::ms(), 'read_at' => null]);
             return $old['id'];
@@ -61,6 +68,26 @@ final class Notify
     {
         [$where, $p] = self::mine();
         return Db::rows("SELECT * FROM notifications WHERE deleted = 0 AND $where ORDER BY done_at IS NOT NULL, at DESC LIMIT $limit", $p);
+    }
+
+    /**
+     * Alerts for me that the phone should ring about (W12): open, and not yet looked at. "Sonra" sets read_at,
+     * which stops the ringing without handling the alert. Oldest first — the plate that has waited longest wins.
+     */
+    public static function alerts(int $limit = 5): array
+    {
+        [$where, $p] = self::mine();
+        $rows = Db::rows("SELECT id, kind, title, body, at FROM notifications WHERE deleted = 0 AND done_at IS NULL
+            AND read_at IS NULL AND kind IN (" . Db::in(self::ALERT_KINDS) . ") AND $where ORDER BY at LIMIT $limit", [...self::ALERT_KINDS, ...$p]);
+        return array_map(static function (array $n): array {
+            $b = json_arr($n['body']);
+            $station = $b['station'] ?? null;
+            return ['id' => $n['id'], 'kind' => $n['kind'], 'where' => (string) ($b['where'] ?? $n['title'] ?? ''),
+                'area' => $b['area'] ?? '' ? tn($b['area']) : '',
+                'station' => $station ? I18n::t('kds.st_' . $station) : '',
+                'items' => array_values(array_filter((array) ($b['items'] ?? []), 'is_array')),
+                'what' => (string) ($b['what'] ?? ''), 'text' => (string) ($b['text'] ?? ''), 'at' => (int) $n['at']];
+        }, $rows);
     }
 
     public static function unread(): int

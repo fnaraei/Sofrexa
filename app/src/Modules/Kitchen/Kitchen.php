@@ -159,7 +159,10 @@ final class Kitchen
         }
         $o = Orders::get($orderId);
         $what = implode(', ', array_map(static fn(array $l): string => $l['name'] . ((float) $l['qty'] > 1 ? ' ×' . Orders::qtyText((float) $l['qty']) : ''), $lines));
-        $params = ['what' => $what, 'text' => $what . ' · ' . ($station === 'bar' ? 'bar' : 'mutfak'), 'lines' => array_column($lines, 'id')];
+        $params = ['what' => $what, 'text' => $what . ' · ' . ($station === 'bar' ? 'bar' : 'mutfak'), 'lines' => array_column($lines, 'id'),
+            // W12: the full-screen alert on the waiter's phone shows the plates one per row, and where to carry them
+            'station' => $station, 'area' => json_arr((string) $o['area_names']) ?: (string) ($o['area_name'] ?? ''),
+            'items' => array_map(static fn(array $l): array => ['name' => $l['name'], 'qty' => Orders::qtyText((float) $l['qty'])], $lines)];
         if (in_array($o['channel'], ['table', 'qr'], true)) {
             Notify::toWaiter('ready', $o, $params);
         } else {

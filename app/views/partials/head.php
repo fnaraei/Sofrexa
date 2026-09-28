@@ -21,7 +21,8 @@ $scripts ??= [];
     'csrf' => \Sofrexa\Core\Csrf::token(),
     'lang' => I18n::lang(),
     'dir' => I18n::dir(),
-    'user' => $u ? ['id' => $u['id'], 'name' => $u['name'], 'role' => $u['role_code']] : null,
+    // 'serves': this person carries plates out, so their phone polls faster and rings when food is ready (W7)
+    'user' => $u ? ['id' => $u['id'], 'name' => $u['name'], 'role' => $u['role_code'], 'serves' => \Sofrexa\Core\Auth::can('orders.take')] : null,
     'icons' => asset('icons.svg'),
     'idleLock' => (int) Settings::get('security.idle_lock_minutes', 0),
     't' => I18n::jsStrings(['js.']),

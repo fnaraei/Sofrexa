@@ -94,7 +94,9 @@ final class Orders
             'table_id' => $attrs['table_id'] ?? null,
             'qr_session_id' => $attrs['qr_session_id'] ?? null,
             'customer_id' => $attrs['customer_id'] ?? null,
-            'waiter_id' => $attrs['waiter_id'] ?? ($u['id'] ?? null),
+            // whoever takes an order owns it; a guest order has no waiter until the till shares it out (Assign)
+            'waiter_id' => $waiter = $attrs['waiter_id'] ?? ($u['id'] ?? null),
+            'assigned_at' => $waiter ? Clock::ms() : null,
             'guests' => (int) ($attrs['guests'] ?? 0),
             'opened_at' => Clock::ms(),
             'note' => $attrs['note'] ?? null,

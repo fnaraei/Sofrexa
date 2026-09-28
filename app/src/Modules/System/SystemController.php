@@ -33,7 +33,10 @@ final class SystemController
 
     public function status(Request $req): void
     {
-        $unread = Auth::user() ? \Sofrexa\Modules\Orders\Notify::unread() : 0;
-        Response::json(['ok' => true, 'sync' => Status::get(), 'unread' => $unread, 'csrf' => Csrf::token()]);
+        $in = (bool) Auth::user();
+        // alerts ring on the phone of whoever carries the plates out (W12), so only they are worth the query
+        $alerts = $in && Auth::can('orders.take') ? \Sofrexa\Modules\Orders\Notify::alerts() : [];
+        Response::json(['ok' => true, 'sync' => Status::get(), 'unread' => $in ? \Sofrexa\Modules\Orders\Notify::unread() : 0,
+            'alerts' => $alerts, 'csrf' => Csrf::token()]);
     }
 }

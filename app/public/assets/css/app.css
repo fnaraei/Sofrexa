@@ -1746,3 +1746,53 @@ a.strow:hover { background: var(--bg-surface-2); }
 @media (min-width: 1024px) {
   .topbanner { padding: 0; }
 }
+
+/* ------------------------------------------------------------ "food is ready" alert (W12 / W12b)
+   The waiter's phone: a green full-screen alert over whatever page is open, big enough to read at arm's
+   length in a busy room, with the chime running until "Aldım" or "Sonra". On desktop the same card sits
+   in the middle of a dimmed screen. A QR order that needs approval wears the attention colour instead. */
+.ralert { position: fixed; inset: 0; z-index: 120; display: grid; animation: fade .15s; }
+.ralert__card { width: 100%; min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: calc(16px + env(safe-area-inset-top)) 20px 0; text-align: center; background: var(--bg-success); color: var(--text-on-brand); }
+.ralert--qr .ralert__card { background: var(--bg-attention); }
+.ralert__ic { flex: none; width: 132px; height: 132px; display: grid; place-items: center; border-radius: 50%; background: var(--bg-success-soft); color: var(--text-success); animation: ralert-pulse 1.4s ease-in-out infinite; }
+.ralert--qr .ralert__ic { background: var(--bg-attention-soft); color: var(--text-attention); }
+.ralert__ic .ic { width: 64px; height: 64px; }
+.ralert__where { font: 800 52px/58px var(--font-ui); letter-spacing: -1px; }
+.ralert__area { margin-top: -14px; font: 700 22px/28px var(--font-ui); letter-spacing: -0.2px; opacity: .75; }
+.ralert__st { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px 9px 16px; border-radius: 999px; background: var(--bg-success-soft); color: var(--text-success); font: 800 16px/20px var(--font-ui); letter-spacing: .4px; }
+.ralert--qr .ralert__st { background: var(--bg-attention-soft); color: var(--text-attention); }
+.ralert__items { width: 100%; max-width: 350px; display: flex; flex-direction: column; gap: 12px; padding: 18px; border-radius: 18px; background: var(--bg-surface); color: var(--text-primary); }
+.ralert__item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font: 700 24px/30px var(--font-ui); text-align: start; }
+.ralert__item + .ralert__item { padding-top: 12px; border-top: 1px solid var(--border-default); }
+.ralert__item b { font-weight: 800; color: var(--text-success); }
+.ralert--qr .ralert__item b { color: var(--text-attention); }
+.ralert__ago { display: inline-flex; align-items: center; gap: 8px; font: 600 14px/18px var(--font-ui); opacity: .8; }
+.ralert__acts { width: 100%; max-width: 350px; display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding: 8px 0 calc(34px + env(safe-area-inset-bottom)); }
+.ralert__go { display: flex; align-items: center; justify-content: center; gap: 10px; height: 84px; padding: 0 24px; border-radius: 18px; background: var(--bg-surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong); font: 600 24px/30px var(--font-ui); }
+.ralert__later { height: 56px; color: var(--text-on-brand); font: 600 18px/24px var(--font-ui); opacity: .75; }
+@keyframes ralert-pulse { 50% { transform: scale(1.08); } }
+@media (prefers-reduced-motion: reduce) { .ralert__ic { animation: none; } }
+@media (min-width: 1024px) {
+  .ralert { place-items: center; padding: 24px; background: var(--bg-scrim); }
+  .ralert__card { width: 760px; min-height: 0; max-height: 100%; overflow-y: auto; gap: 24px; padding: 48px 56px 40px; border-radius: 32px; box-shadow: var(--shadow-pop); }
+  .ralert__ic { width: 160px; height: 160px; }
+  .ralert__ic .ic { width: 78px; height: 78px; }
+  .ralert__where { font-size: 72px; line-height: 80px; letter-spacing: -1.6px; }
+  .ralert__area { margin-top: -18px; font-size: 28px; line-height: 36px; }
+  .ralert__st { padding: 11px 22px 11px 20px; gap: 10px; font-size: 18px; line-height: 24px; }
+  .ralert__st .ic { width: 24px; height: 24px; }
+  .ralert__items { max-width: 648px; gap: 16px; padding: 24px; border-radius: 22px; }
+  .ralert__item { font-size: 28px; line-height: 36px; }
+  .ralert__item + .ralert__item { padding-top: 16px; }
+  .ralert__ago { font-size: 18px; line-height: 24px; }
+  .ralert__acts { max-width: 648px; margin-top: 0; padding: 0; }
+  .ralert__go { height: 96px; border-radius: 20px; font-size: 28px; line-height: 36px; }
+  .ralert__later { height: 64px; font-size: 20px; line-height: 26px; }
+}
+/* a laptop screen is shorter than the 1080 the design was drawn on: tighten it so it still fits without scrolling */
+@media (min-width: 1024px) and (max-height: 960px) {
+  .ralert__card { gap: 16px; padding: 32px 56px 28px; }
+  .ralert__ic { width: 120px; height: 120px; }
+  .ralert__ic .ic { width: 58px; height: 58px; }
+  .ralert__where { font-size: 60px; line-height: 66px; }
+}

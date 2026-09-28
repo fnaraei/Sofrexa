@@ -522,4 +522,13 @@ return [
     'notif.bill_by' => ['{name} hesabı istedi', '{name} asked for the bill', '{name} صورتحساب را خواست', '{name} запросил(а) счёт'],
     'notif.bill_qr' => ['Müşteri QR menüden hesabı istedi', 'The guest asked for the bill on the QR menu', 'مشتری از منوی QR صورتحساب خواست', 'Гость запросил счёт через QR-меню'],
     'notif.call_qr' => ['QR menüden “Garson çağır”', '“Call waiter” on the QR menu', '«صدا زدن گارسون» از منوی QR', '«Позвать официанта» в QR-меню'],
+
+    // the full-screen alert on the waiter's phone (W12)
+    'js.ring_ready' => ['Sipariş hazır', 'Order ready', 'سفارش آماده است', 'Заказ готов'],
+    'js.ring_qr' => ['Yeni QR siparişi', 'New QR order', 'سفارش QR تازه', 'Новый QR-заказ'],
+    'js.ring_got' => ['Aldım', 'Got it', 'گرفتم', 'Забрал'],
+    'js.ring_review' => ['Gözden geçir', 'Review', 'بررسی', 'Открыть'],
+    'js.ring_later' => ['Sonra', 'Later', 'بعداً', 'Позже'],
+    'js.ring_now' => ['Az önce', 'Just now', 'همین حالا', 'Только что'],
+    'js.ring_ago' => ['{n} dk önce', '{n} min ago', '{n} دقیقه پیش', '{n} мин назад'],
 ];

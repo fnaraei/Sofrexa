@@ -1,6 +1,6 @@
 # Screens / صفحه‌ها
 
-Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **108 screens** (8 added after the 2026-09-28 audit: cancelled dishes IP1–IP4, C1b, C8b, W6b, S4b). Every screen links to its frame. Overview images are in [`design/`](../design/).
+Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **110 screens** (8 added after the 2026-09-28 audit: cancelled dishes IP1–IP4, C1b, C8b, W6b, S4b; then W12 and W12b, the loud "food is ready" alert on the waiter's phone). Every screen links to its frame. Overview images are in [`design/`](../design/).
 
 🆕 = added in design v1.1 (2026-09-28) · ✏️ = changed in v1.1 (Sofrexa branding, password login, loyalty points).
 
@@ -34,6 +34,8 @@ Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **108 screens** (
 | W10 | Sipariş al · Desktop (kasa/tablet) | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=22-1214) |
 | W11 | Masalar (tüm bölümler) · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=23-1550) |
 | W6b 🆕 | Bildirimler — iptal ve yazıcı · Mobile (on the Kasa page) | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=135-2085) |
+| W12 🆕 | Hazır uyarısı (tam ekran, sesli) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=143-1951) |
+| W12b 🆕 | Hazır uyarısı · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=146-1964) |
 
 ## 03 · Kasa · صندوق
 
