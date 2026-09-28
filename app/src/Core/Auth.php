@@ -46,7 +46,10 @@ final class Auth
             $uid = $_SESSION['uid'] ?? null;
             if ($uid) {
                 $u = Db::row('SELECT u.*, r.code AS role_code, r.name AS role_name, r.perms AS role_perms FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.active = 1 AND u.deleted = 0', [$uid]);
-                if ($u && ($u['password_hash'] ?? '') === ($_SESSION['pwv'] ?? $u['password_hash'])) {
+                // the session remembers the password hash it was opened with, so changing a password ends the old
+                // sessions. Most staff sign in by PIN and have no password at all: null must match null, so the
+                // left side is compared as it is — coercing it to '' locked every one of them straight out again.
+                if ($u && $u['password_hash'] === ($_SESSION['pwv'] ?? $u['password_hash'])) {
                     self::$user = self::withPerms($u);
                 } else {
                     unset($_SESSION['uid']);

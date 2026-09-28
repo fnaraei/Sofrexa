@@ -52,6 +52,25 @@ return [
         check(@Auth::loginPin($id, '4821', '127.0.0.1')['ok'], 'unlocked after 30 s');
     },
 
+    'signing in by PIN keeps the session, and changing a password ends the old ones' => function (): void {
+        Seed::base(static fn() => null);
+        $waiter = Seed::user('Ayşe Test', 'waiter', '4821');
+        $_SESSION = [];
+        check(@Auth::loginPin($waiter, '4821', '127.0.0.1')['ok'], 'the PIN is right');
+        // most staff have no password at all; the session check used to compare '' with null and throw them out
+        same($waiter, Auth::user()['id'] ?? null, 'a PIN-only user stays signed in');
+
+        $boss = Seed::user('Patron Test', 'manager', '9182');
+        Db::save('users', ['id' => $boss, 'password_hash' => password_hash('ilk-parola', PASSWORD_DEFAULT)]);
+        $_SESSION = [];
+        check(@Auth::loginPin($boss, '9182', '127.0.0.1')['ok'], 'the manager signs in by PIN as well');
+        same($boss, Auth::user()['id'] ?? null, 'a user with a password stays signed in too');
+        Db::save('users', ['id' => $boss, 'password_hash' => password_hash('yeni-parola', PASSWORD_DEFAULT)]);
+        Auth::actAs(null);
+        (new ReflectionProperty(Auth::class, 'loaded'))->setValue(null, false);
+        same(null, Auth::user(), 'the session opened with the old password is over');
+    },
+
     'audit log and cash moves cannot be changed or deleted' => function (): void {
         Db::append('audit_log', ['at' => 1, 'action' => 'test', 'summary' => 'x']);
         foreach (['UPDATE audit_log SET summary = ?' => ['y'], 'DELETE FROM audit_log' => []] as $sql => $params) {
