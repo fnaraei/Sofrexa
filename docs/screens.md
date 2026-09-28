@@ -1,6 +1,6 @@
 # Screens / صفحه‌ها
 
-Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **97 screens**. Every screen links to its frame. Overview images are in [`design/`](../design/).
+Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **100 screens**. Every screen links to its frame. Overview images are in [`design/`](../design/).
 
 🆕 = added in design v1.1 (2026-09-28) · ✏️ = changed in v1.1 (Sofrexa branding, password login, loyalty points).
 
@@ -104,6 +104,7 @@ Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **97 screens**. E
 | CU4 | Müşteri hesabı + tahsilat · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=41-652) |
 | CU5 🆕 | Sadakat programı · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=81-425) |
 | CU6 🆕 | Yeni müşteri (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=81-888) |
+| CU7 🆕 | Müşteri seviyesi (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=103-743) |
 
 ## 08 · Personel · پرسنل
 
@@ -118,6 +119,8 @@ Figma: https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw — **97 screens**. E
 | ST5 🆕 | Roller ve yetkiler · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=93-354) |
 | ST6 🆕 | Etkinlik kaydı · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=93-813) |
 | ST7 🆕 | Etkinlik kaydı · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=93-1214) |
+| ST8 🆕 | Kullanıcılar ve giriş · Desktop | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=104-836) |
+| ST9 🆕 | Kullanıcı düzenle (sheet) · Mobile | [open](https://www.figma.com/design/1VzYLeeic0ExwgdWt7RbVw?node-id=104-1339) |
 
 ## 09 · Raporlar · گزارش‌ها
 

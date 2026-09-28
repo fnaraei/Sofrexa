@@ -109,6 +109,17 @@ New screens are marked 🆕 in [screens.md](screens.md). Build them with the sam
   - Points are earned on the amount actually paid, after discounts and points.
   - Tier rates: Bronze 5 %, Silver 7 %, Gold 10 %. 1 point = ₺1. Minimum use is 100 points.
   - ItKafe bonus balances are imported as points.
+- **Loyalty tiers (CU5, CU7):**
+  - Each tier has a name, a yearly-spend threshold, a discount % and an earn %, all editable. The point value, minimum redemption and expiry are editable too.
+  - A nightly job recalculates each customer's tier from the last 12 months of spending.
+  - A tier set by hand (CU7) is kept until it is switched back to automatic.
+  - If a customer has both a tier discount and a personal discount, the larger one applies.
+- **Users (ST8, ST9):**
+  - The manager adds, edits and deletes users and resets PINs and passwords.
+  - Delete means deactivate: history stays linked.
+  - A new PIN is shown once.
+  - 3 wrong PINs lock the user for 30 s.
+  - Remote (off-site) login needs email + password and is off by default.
 - **Roles (ST5)** set the defaults. A person-level exception (ST4) overrides their role.
 - **Activity log (ST6/ST7):**
   - Written by the server for every sensitive action: login and failed PIN, void, discount, price change, drawer open, cash in and out, settings change, backup and restore.
