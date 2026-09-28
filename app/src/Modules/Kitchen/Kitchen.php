@@ -112,6 +112,15 @@ final class Kitchen
         return count($lines);
     }
 
+    // ------------------------------------------------------------ the "food is ready" alert (decision 49)
+    //
+    // A plate is the waiter's business from the moment the kitchen calls it — "Hazır" on its ticket, or "Garsonu tekrar
+    // çağır" — and until it is carried out. That moment is kept on the plate itself (order_items.called_at) and goes
+    // wherever the plate goes: to another bill in a split or a merge, back to nothing when the kitchen takes it back.
+    // An order's ready alert is never kept in step by hand: announce() builds it from its called, ready plates, every
+    // time something touches them. A plate only tapped as plated on an unfinished ticket is ready but not called, and
+    // so on no alert, wherever it moves.
+
     /** Tap on an item: plated (ready) or back. The ticket's last item works like "Hazır". */
     public static function toggleLine(string $lineId): string
     {
@@ -120,19 +129,20 @@ final class Kitchen
             throw new \Sofrexa\Core\HttpError(404);
         }
         if ($l['status'] === 'ready') {
-            Db::save('order_items', ['id' => $lineId, 'status' => 'sent', 'ready_at' => null]);
-            self::retell($l['order_id']); // a plate taken back leaves the waiter's alert
+            Db::save('order_items', ['id' => $lineId, 'status' => 'sent', 'ready_at' => null, 'called_at' => null]);
+            self::announce($l['order_id']);
             return 'sent';
         }
         if (count(self::open($l['order_id'], (int) $l['round'], $l['station'])) <= 1) {
             self::ready($l['order_id'], (int) $l['round'], $l['station']);
             return 'ready';
         }
+        // plated, not called: the waiter hears about it with the rest of the ticket
         Db::save('order_items', ['id' => $lineId, 'status' => 'ready', 'ready_at' => Clock::ms(), 'started_at' => $l['started_at'] ?: Clock::ms()]);
         return 'ready';
     }
 
-    /** "Hazır": every open line of the ticket is ready and the waiter is told (the whole ticket). Returns the lines marked. */
+    /** "Hazır": every open line of the ticket is ready, the ticket's plates are called and the waiter is told. Returns the lines marked. */
     public static function ready(string $orderId, int $round, string $station): int
     {
         $open = self::open($orderId, $round, $station);
@@ -142,91 +152,103 @@ final class Kitchen
                 Db::save('order_items', ['id' => $l['id'], 'status' => 'ready', 'ready_at' => $now, 'started_at' => $l['started_at'] ?: $now]);
             }
         });
-        self::tell($orderId, $round, $station);
+        self::call($orderId, $round, $station);
         return count($open);
     }
 
-    /** "Garsonu tekrar çağır": the alert again. */
+    /** "Garsonu tekrar çağır": the ticket's ready plates called again, and the alert rings again. */
     public static function callAgain(string $orderId, int $round, string $station): void
     {
-        self::tell($orderId, $round, $station);
+        self::call($orderId, $round, $station);
     }
 
-    private static function tell(string $orderId, int $round, string $station): void
+    private static function call(string $orderId, int $round, string $station): void
     {
-        $lines = Db::rows("SELECT * FROM order_items WHERE order_id = ? AND round = ? AND station = ? AND status = 'ready' AND deleted = 0", [$orderId, $round, $station]);
-        if (!$lines) {
-            return;
+        $now = Clock::ms();
+        foreach (Db::rows("SELECT id FROM order_items WHERE order_id = ? AND round = ? AND station = ? AND status = 'ready' AND called_at IS NULL AND deleted = 0", [$orderId, $round, $station]) as $l) {
+            Db::save('order_items', ['id' => $l['id'], 'called_at' => $now]);
         }
-        $o = Orders::get($orderId);
-        $what = implode(', ', array_map(static fn(array $l): string => $l['name'] . ((float) $l['qty'] > 1 ? ' ×' . Orders::qtyText((float) $l['qty']) : ''), $lines));
-        $params = ['what' => $what, 'text' => $what . ' · ' . ($station === 'bar' ? 'bar' : 'mutfak'), 'lines' => array_column($lines, 'id'),
-            // W12: the full-screen alert on the waiter's phone shows the plates one per row, and where to carry them
-            'station' => $station, 'area' => json_arr((string) $o['area_names']) ?: (string) ($o['area_name'] ?? ''),
-            'items' => array_map(static fn(array $l): array => ['id' => $l['id'], 'name' => $l['name'], 'qty' => Orders::qtyText((float) $l['qty'])], $lines)];
-        if (in_array($o['channel'], ['table', 'qr'], true)) {
-            Notify::toWaiter('ready', $o, $params);
-        } else {
-            // takeaway / delivery / online: the till prepares the bag and the courier
-            Notify::push('ready', $params + ['where' => Orders::where($o)], null, 'cashier', $orderId);
-        }
+        self::announce($orderId, true);
     }
 
-    /** Undo "Hazır" (a wrong tap) while the plates are still in the kitchen. */
+    /** Undo "Hazır" (a wrong tap) while the plates are still in the kitchen: back to cooking, and no longer called. */
     public static function recall(string $orderId, int $round, string $station): int
     {
         $lines = Db::rows("SELECT id FROM order_items WHERE order_id = ? AND round = ? AND station = ? AND status = 'ready' AND deleted = 0", [$orderId, $round, $station]);
         foreach ($lines as $l) {
-            Db::save('order_items', ['id' => $l['id'], 'status' => 'sent', 'ready_at' => null]);
+            Db::save('order_items', ['id' => $l['id'], 'status' => 'sent', 'ready_at' => null, 'called_at' => null]);
         }
         if ($lines) {
-            // only these plates leave the alert: another round still waiting at the pass keeps ringing
-            self::retell($orderId);
+            self::announce($orderId);
             Audit::log('kitchen.recall', Orders::where(Orders::get($orderId)) . ' · ' . count($lines) . ' ürün geri alındı', 'order', $orderId);
         }
         return count($lines);
     }
 
-    /**
-     * The ready alert of an order made to match the plates really waiting for it: after the kitchen took some back, or a
-     * split or a merge moved plates to another bill. Plates no longer ready here leave its alert (which closes when
-     * empty, without ringing again); ready plates it does not list yet — ones that came over from another bill — are
-     * put on it, and for those it rings. So a plate at the pass always has one alert, on the bill it belongs to.
-     */
+    /** After a split, a merge, a cancelled or a taken-back plate: the alerts of the orders involved built again. */
     public static function retell(string $orderId): void
     {
-        $ready = Db::rows("SELECT id, round, station, name, qty FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0", [$orderId]);
-        // what the alert lists is rebuilt from the lines as they are now: a partly cancelled plate shows its new count
-        $listed = Notify::keepLines($orderId, array_map(static fn(array $l): array => ['id' => $l['id'], 'name' => $l['name'], 'qty' => Orders::qtyText((float) $l['qty'])], $ready));
-        // a plate tapped as plated on a ticket that is not finished yet is not the waiter's business until "Hazır"
-        $unfinished = [];
-        foreach (Db::rows("SELECT DISTINCT round, station FROM order_items WHERE order_id = ? AND status = 'sent' AND deleted = 0", [$orderId]) as $u) {
-            $unfinished[$u['round'] . '|' . $u['station']] = true;
-        }
-        $groups = [];
-        foreach ($ready as $l) {
-            $key = $l['round'] . '|' . $l['station'];
-            if (!in_array((string) $l['id'], $listed, true) && !isset($unfinished[$key])) {
-                $groups[$key] = [(int) $l['round'], (string) $l['station']];
+        self::announce($orderId);
+    }
+
+    /**
+     * An order's ready alert, built from its called, ready plates as they are now (name, count, line). None: the alert
+     * closes. The same plates it already listed: it is brought up to date quietly (a partly cancelled plate shows its
+     * new count). A plate it did not list yet, or $ring ("Hazır", "Garsonu tekrar çağır"): it rings again. Goes to the
+     * table's waiter while on shift, otherwise every waiter; takeaway, delivery and online plates go to the till.
+     */
+    public static function announce(string $orderId, bool $ring = false): void
+    {
+        $lines = Db::rows("SELECT id, name, qty, station FROM order_items WHERE order_id = ? AND status = 'ready' AND called_at IS NOT NULL AND deleted = 0
+            ORDER BY round, called_at, rowid", [$orderId]);
+        $open = Db::row("SELECT * FROM notifications WHERE ref_type = 'order' AND ref_id = ? AND kind = 'ready' AND done_at IS NULL AND deleted = 0", [$orderId]);
+        if (!$lines) {
+            if ($open) {
+                Notify::done($open['id']);
             }
+            return;
         }
-        foreach ($groups as [$round, $station]) {
-            self::tell($orderId, $round, $station);
+        $o = Orders::get($orderId);
+        $stations = array_values(array_unique(array_column($lines, 'station')));
+        $body = Notify::describe(['where' => Orders::where($o), 'lines' => array_column($lines, 'id'),
+            // W12: the full-screen alert on the waiter's phone shows the plates one per row, and where to carry them
+            'station' => count($stations) === 1 ? $stations[0] : null, 'area' => json_arr((string) $o['area_names']) ?: (string) ($o['area_name'] ?? ''),
+            'items' => array_map(static fn(array $l): array => ['id' => $l['id'], 'name' => $l['name'], 'qty' => Orders::qtyText((float) $l['qty'])], $lines)]);
+        $atTable = in_array($o['channel'], ['table', 'qr'], true);
+        $to = $atTable ? Notify::recipient($o['waiter_id'] ?? null) : null;
+        $role = $atTable ? 'waiter' : 'cashier';
+        if (!$open) {
+            Db::save('notifications', ['user_id' => $to, 'role' => $to ? null : $role, 'kind' => 'ready', 'title' => $body['where'],
+                'body' => $body, 'ref_type' => 'order', 'ref_id' => $orderId, 'at' => Clock::ms()]);
+            return;
+        }
+        $new = array_diff(array_column($lines, 'id'), array_map('strval', (array) (json_arr($open['body'])['lines'] ?? [])));
+        if ($ring || $new) {
+            Db::save('notifications', ['id' => $open['id'], 'body' => $body, 'at' => Clock::ms(), 'read_at' => null, 'user_id' => $to, 'role' => $to ? null : $role]);
+        } elseif (json_arr($open['body']) != $body) {
+            Db::save('notifications', ['id' => $open['id'], 'body' => $body]);
         }
     }
 
-    /** The waiter took the plates ("Aldım"): ready lines become served and leave the screens. */
-    public static function served(string $orderId, array $lineIds = []): void
+    /**
+     * The waiter took the plates ("Aldım"): these ready lines become served and leave the screens. $lineIds null means
+     * every ready plate of the order; an empty list means none — "Aldım" with nothing seen hands nothing over.
+     */
+    public static function served(string $orderId, ?array $lineIds = null): void
     {
+        if ($lineIds === []) {
+            return;
+        }
         $sql = "SELECT id FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0";
         $p = [$orderId];
-        if ($lineIds) {
+        if ($lineIds !== null) {
             $sql .= ' AND id IN (' . Db::in($lineIds) . ')';
             $p = [...$p, ...$lineIds];
         }
         foreach (Db::rows($sql, $p) as $l) {
             Db::save('order_items', ['id' => $l['id'], 'status' => 'served', 'served_at' => Clock::ms()]);
         }
+        self::announce($orderId); // carried out: off the alert, whichever way they were handed over
     }
 
     private static function open(string $orderId, int $round, string $station): array

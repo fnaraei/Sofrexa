@@ -38,11 +38,8 @@ final class Notify
     public static function push(string $kind, array $params, ?string $userId = null, ?string $role = null, ?string $orderId = null): string
     {
         // one open notification per order and kind is enough (a second "bill" tap refreshes it)
+        // (the "food is ready" alert is not made here: Kitchen::announce builds it from the plates themselves)
         if ($orderId && ($old = Db::row('SELECT id, body FROM notifications WHERE ref_type = ? AND ref_id = ? AND kind = ? AND done_at IS NULL AND deleted = 0', ['order', $orderId, $kind]))) {
-            $prev = json_arr($old['body']);
-            if (isset($prev['lines'], $params['lines'])) {
-                $params = self::withPlates($prev, $params);
-            }
             // the bill may have changed hands since the first alert: it goes to whoever looks after the table now
             Db::save('notifications', ['id' => $old['id'], 'body' => $params, 'at' => Clock::ms(), 'read_at' => null,
                 'user_id' => $userId, 'role' => $userId ? null : $role]);
@@ -50,26 +47,6 @@ final class Notify
         }
         return Db::save('notifications', ['user_id' => $userId, 'role' => $userId ? null : $role, 'kind' => $kind, 'title' => $params['where'] ?? null,
             'body' => $params, 'ref_type' => $orderId ? 'order' : null, 'ref_id' => $orderId, 'at' => Clock::ms()]);
-    }
-
-    /**
-     * More plates for an open "ready" alert: one alert listing all of them, one row per order line. Calling the waiter
-     * again for the same plates changes nothing, and every row keeps its line, so "Aldım" can say exactly what was seen.
-     */
-    private static function withPlates(array $prev, array $params): array
-    {
-        $rows = [];
-        foreach ([...(array) ($prev['items'] ?? []), ...(array) ($params['items'] ?? [])] as $i) {
-            if (is_array($i)) {
-                $rows[(string) ($i['id'] ?? 'row' . count($rows))] = $i;
-            }
-        }
-        $params['lines'] = array_values(array_unique(array_merge((array) $prev['lines'], (array) $params['lines'])));
-        $params['items'] = array_values($rows);
-        if (($prev['station'] ?? null) !== ($params['station'] ?? null)) {
-            $params['station'] = null; // the kitchen and the bar both have something: no single badge fits
-        }
-        return self::describe($params);
     }
 
     /** "what" and "text" of a ready alert, rebuilt from its plate rows (the notifications list reads them). */
@@ -105,38 +82,6 @@ final class Notify
             self::saveLines($n['id'], $b, $left, null);
             return $took;
         });
-    }
-
-    /**
-     * Makes the open ready alert of an order match $ready — the plates really waiting on it, as rows [id, name, qty]:
-     * plates it lists that are no longer among them leave it (taken back by the kitchen, moved to another bill,
-     * cancelled; with none left it closes), and the ones it keeps show their count as it is now (a plate partly
-     * cancelled). It does not ring again for that. Returns the plates the alert still lists.
-     */
-    public static function keepLines(string $orderId, array $ready): array
-    {
-        $n = Db::row("SELECT * FROM notifications WHERE ref_type = 'order' AND ref_id = ? AND kind = 'ready' AND done_at IS NULL AND deleted = 0", [$orderId]);
-        if (!$n) {
-            return [];
-        }
-        $now = [];
-        foreach ($ready as $r) {
-            $now[(string) $r['id']] = $r;
-        }
-        $b = json_arr($n['body']);
-        $had = array_map('strval', (array) ($b['lines'] ?? []));
-        $keep = array_values(array_filter($had, static fn(string $id): bool => isset($now[$id])));
-        if (!$keep) {
-            self::done($n['id']);
-            return [];
-        }
-        $items = array_map(static fn(string $id): array => ['id' => $id, 'name' => (string) $now[$id]['name'], 'qty' => (string) $now[$id]['qty']], $keep);
-        if ($keep !== $had || $items !== array_values(array_filter((array) ($b['items'] ?? []), 'is_array'))) {
-            $b['lines'] = $keep;
-            $b['items'] = $items;
-            Db::save('notifications', ['id' => $n['id'], 'body' => self::describe($b), 'read_at' => $n['read_at']]);
-        }
-        return $keep;
     }
 
     /** A ready alert's body cut down to $lines (with their plate rows); $readAt null makes it ring again. */

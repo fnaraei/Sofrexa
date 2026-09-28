@@ -845,16 +845,24 @@ final class Orders
     public static function refundPlan(array $o): array
     {
         $over = max(0, (int) $o['paid'] - (int) $o['total']);
+        // each customer's net account payment on this bill, the customer of the newest payment first. "Newest" is the
+        // time, then the id — time-ordered, the same on the PC and the web copy — so two payments in the same
+        // millisecond still have one order, the order they were taken in
+        $net = [];
+        foreach (Db::rows("SELECT customer_id, amount FROM payments WHERE order_id = ? AND method = 'account' ORDER BY at DESC, id DESC", [$o['id']]) as $r) {
+            $net[(string) $r['customer_id']] = ($net[(string) $r['customer_id']] ?? 0) + (int) $r['amount'];
+        }
         $left = $over;
         $account = [];
-        foreach (Db::rows("SELECT customer_id, SUM(amount) AS amount, MAX(at) AS last FROM payments WHERE order_id = ? AND method = 'account'
-            GROUP BY customer_id HAVING SUM(amount) > 0 ORDER BY last DESC", [$o['id']]) as $r) {
+        foreach ($net as $customerId => $amount) {
             if ($left <= 0) {
                 break;
             }
-            $take = min($left, (int) $r['amount']);
-            $account[(string) $r['customer_id']] = $take;
-            $left -= $take;
+            if ($amount > 0) {
+                $take = min($left, $amount);
+                $account[$customerId] = $take;
+                $left -= $take;
+            }
         }
         $card = (int) Db::value("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE order_id = ? AND method = 'card'", [$o['id']]);
         return ['over' => $over, 'account' => $account, 'money' => $left, 'card' => max(0, $card)];
@@ -965,6 +973,7 @@ final class Orders
                 Db::save('order_items', ['id' => $l['id'], 'status' => 'served', 'served_at' => Clock::ms()]);
             }
             \Sofrexa\Modules\QrOrder\QrOrders::closeSessions(Db::value('SELECT table_id FROM orders WHERE id = ?', [$orderId]));
+            \Sofrexa\Modules\Kitchen\Kitchen::announce($orderId); // its plates were carried out: no alert left, whoever closed it
         }
         \Sofrexa\Modules\Customers\Loyalty::settle($orderId);
         \Sofrexa\Modules\Customers\Loyalty::earn($orderId);
