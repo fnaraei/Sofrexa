@@ -43,6 +43,10 @@ final class NotifyController
                 Notify::done($n['id']);
                 break;
             default:
+                // "Aldım" on a ready alert: the plates left the kitchen
+                if ($n['kind'] === 'ready' && $n['ref_type'] === 'order' && $n['ref_id']) {
+                    \Sofrexa\Modules\Kitchen\Kitchen::served($n['ref_id'], (array) (json_arr($n['body'])['lines'] ?? []));
+                }
                 Notify::done($n['id']);
         }
         Response::json(['ok' => true, 'reload' => true]);

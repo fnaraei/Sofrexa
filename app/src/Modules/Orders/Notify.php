@@ -17,9 +17,16 @@ final class Notify
     public static function push(string $kind, array $params, ?string $userId = null, ?string $role = null, ?string $orderId = null): string
     {
         // one open notification per order and kind is enough (a second "bill" tap refreshes it)
-        if ($orderId && ($old = Db::value('SELECT id FROM notifications WHERE ref_type = ? AND ref_id = ? AND kind = ? AND done_at IS NULL AND deleted = 0', ['order', $orderId, $kind]))) {
-            Db::save('notifications', ['id' => $old, 'body' => $params, 'at' => Clock::ms(), 'read_at' => null]);
-            return $old;
+        if ($orderId && ($old = Db::row('SELECT id, body FROM notifications WHERE ref_type = ? AND ref_id = ? AND kind = ? AND done_at IS NULL AND deleted = 0', ['order', $orderId, $kind]))) {
+            $prev = json_arr($old['body']);
+            if (isset($prev['lines'], $params['lines'])) {
+                // more plates of the same table: one alert listing all of them
+                $params['lines'] = array_values(array_unique(array_merge((array) $prev['lines'], (array) $params['lines'])));
+                $params['what'] = trim(($prev['what'] ?? '') . ', ' . ($params['what'] ?? ''), ', ');
+                $params['text'] = trim(($prev['text'] ?? '') . ', ' . ($params['text'] ?? ''), ', ');
+            }
+            Db::save('notifications', ['id' => $old['id'], 'body' => $params, 'at' => Clock::ms(), 'read_at' => null]);
+            return $old['id'];
         }
         return Db::save('notifications', ['user_id' => $userId, 'role' => $userId ? null : $role, 'kind' => $kind, 'title' => $params['where'] ?? null,
             'body' => $params, 'ref_type' => $orderId ? 'order' : null, 'ref_id' => $orderId, 'at' => Clock::ms()]);

@@ -222,6 +222,7 @@ final class Orders
             }
         });
         Tickets::kitchen($orderId, array_column($new, 'id'), $round);
+        \Sofrexa\Modules\Stock\Stock::consume(array_column($new, 'id'));
         return count($new);
     }
 
@@ -258,6 +259,7 @@ final class Orders
         $amount = (int) round($qty * ((int) $l['unit_price'] + (int) $l['mods_price']));
         Audit::log('order.void_item', self::where($o) . ' · ' . $l['name'] . ' ×' . self::qtyText($qty) . ' · ' . Money::fmt($amount, false, 'tr') . ' · sebep: ' . $reason, 'order', $o['id'], ['line' => $l['id']]);
         Tickets::void($o['id'], $l['id'], $qty, $reason);
+        \Sofrexa\Modules\Stock\Stock::giveBack($l['id'], $qty);
     }
 
     public static function discount(string $orderId, string $kind, float $value, string $reason = ''): void
@@ -500,6 +502,9 @@ final class Orders
         foreach ($o['lines'] as $l) {
             if ($l['status'] !== 'void') {
                 Db::save('order_items', ['id' => $l['id'], 'status' => 'void', 'void_reason' => $reason, 'void_by' => Auth::user()['id'] ?? null, 'void_at' => Clock::ms()]);
+                if ($l['sent_at']) {
+                    \Sofrexa\Modules\Stock\Stock::giveBack($l['id'], (float) $l['qty']);
+                }
             }
         }
         Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim(($o['note'] ?? '') . ' · iptal: ' . $reason, ' ·')]);
