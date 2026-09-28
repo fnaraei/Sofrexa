@@ -33,8 +33,7 @@ final class SystemController
 
     public function status(Request $req): void
     {
-        $u = Auth::user();
-        $unread = (int) Db::value('SELECT COUNT(*) FROM notifications WHERE read_at IS NULL AND (user_id = ? OR role = ?)', [$u['id'], $u['role_code']]);
+        $unread = Auth::user() ? \Sofrexa\Modules\Orders\Notify::unread() : 0;
         Response::json(['ok' => true, 'sync' => Status::get(), 'unread' => $unread, 'csrf' => Csrf::token()]);
     }
 }

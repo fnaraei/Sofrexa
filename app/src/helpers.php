@@ -133,3 +133,24 @@ function digits(string|int $s): string
 {
     return I18n::lang() === 'fa' ? I18n::faDigits((string) $s) : (string) $s;
 }
+
+/** Time since $ms as on the Figma tiles: "12 dk", "1 sa 10 dk", "1 sa" (Persian keeps plain minutes: "۶۵ دقیقه"). */
+function dur(?int $ms, ?int $now = null): string
+{
+    if (!$ms) {
+        return '';
+    }
+    $m = max(0, intdiv(($now ?? \Sofrexa\Core\Clock::ms()) - $ms, 60_000));
+    if ($m < 60 || I18n::lang() === 'fa') {
+        return t('dur.min', ['m' => digits($m)]);
+    }
+    $h = intdiv($m, 60);
+    $m %= 60;
+    return $m === 0 ? t('dur.h', ['h' => digits($h)]) : t('dur.hm', ['h' => digits($h), 'm' => digits($m)]);
+}
+
+/** First name for compact lines ("Ayşe" from "Ayşe Yıldız"). */
+function first_name(?string $name): string
+{
+    return $name ? explode(' ', trim($name))[0] : '';
+}

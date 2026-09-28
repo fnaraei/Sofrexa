@@ -173,8 +173,56 @@
       if (res.message) S.toast(res.message);
       if (res.redirect) location.href = res.redirect;
       else if (b.hasAttribute('data-reload')) setTimeout(() => location.reload(), 350);
+      else if (b.closest('.scrim') && !b.hasAttribute('data-keep-open')) S.closeSheet(b.closest('.scrim'));
     } catch (err) { /* toast shown */ } finally {
       b.classList.remove('is-busy');
+    }
+  });
+
+  /* ------------------------------------------------------------ sheets loaded from the server */
+  /** GET url → {html} (a .scrim[data-dyn]) opened on top, or {redirect}. Removed again when closed. */
+  S.loadSheet = async function (url) {
+    const res = await S.api(url);
+    if (res.redirect) { location.href = res.redirect; return null; }
+    S.$$('.scrim:not([hidden])').forEach(s => S.closeSheet(s));
+    const box = document.createElement('div');
+    box.innerHTML = res.html.trim();
+    const scrim = box.firstElementChild;
+    document.body.appendChild(scrim);
+    scrim.addEventListener('sheet:close', () => setTimeout(() => scrim.remove(), 50));
+    S.openSheet(scrim);
+    document.dispatchEvent(new CustomEvent('sheet:loaded', { detail: scrim }));
+    return scrim;
+  };
+  document.addEventListener('click', function (e) {
+    const b = e.target.closest('[data-load-sheet]');
+    if (!b) return;
+    e.preventDefault();
+    S.loadSheet(b.dataset.loadSheet).catch(() => {});
+  });
+  document.addEventListener('ajax:done', e => { if (e.detail && e.detail.reload) setTimeout(() => location.reload(), 300); });
+  document.addEventListener('post:done', e => { if (e.detail && e.detail.reload) setTimeout(() => location.reload(), 300); });
+
+  /* ------------------------------------------------------------ quantity stepper and reason chips */
+  document.addEventListener('click', function (e) {
+    const step = e.target.closest('[data-step]');
+    if (step) {
+      const box = step.closest('[data-stepper]');
+      const input = box.querySelector('[data-stepper-v]');
+      const min = parseFloat(input.dataset.min || '0');
+      const max = parseFloat(input.dataset.max || '99');
+      const v = Math.min(max, Math.max(min, (parseFloat(input.value) || 0) + parseFloat(step.dataset.step)));
+      input.value = v;
+      box.querySelector('[data-stepper-n]').textContent = S.digits(String(v).replace('.', ','));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    const chip = e.target.closest('[data-fill] .chip');
+    if (chip) {
+      const wrap = chip.closest('[data-fill]');
+      const field = wrap.closest('form').elements[wrap.dataset.fill];
+      if (field) { field.value = chip.dataset.value; field.dispatchEvent(new Event('input', { bubbles: true })); }
+      wrap.querySelectorAll('.chip').forEach(c => c.classList.toggle('is-selected', c === chip));
     }
   });
 
@@ -200,6 +248,7 @@
       if (r.csrf) S.csrf = r.csrf;
       const dot = S.$('[data-notif-dot]');
       if (dot) dot.hidden = !r.unread;
+      S.$$('[data-offline-banner]').forEach(b => { b.hidden = r.sync.state !== 'offline'; });
       document.dispatchEvent(new CustomEvent('status', { detail: r }));
     } catch (e) {
       if (e.message !== 'auth') S.setSync('offline', S.tr('js.offline'));

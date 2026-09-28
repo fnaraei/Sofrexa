@@ -411,7 +411,8 @@ final class Orders
                 $customerId = $customerId ?: $o['customer_id'];
                 Accounts::assertCredit($customerId, $amount);
             }
-            $rows[] = compact('method', 'cur', 'fx', 'amount', 'rate');
+            $courier = $p['courier_id'] ?? null;
+            $rows[] = compact('method', 'cur', 'fx', 'amount', 'rate', 'courier');
             $sum += $amount;
         }
         if (!$rows) {
@@ -438,7 +439,7 @@ final class Orders
                 Db::append('payments', [
                     'order_id' => $orderId, 'shift_id' => $shift, 'method' => $r['method'], 'currency' => $r['cur'], 'amount_fx' => $r['fx'], 'rate' => $r['rate'],
                     'amount' => $r['amount'] - ($r['give'] ?? 0), 'change_given' => $r['give'] ?? 0, 'customer_id' => $r['method'] === 'account' ? $customerId : ($customerId ?: $o['customer_id']),
-                    'at' => Clock::ms(), 'user_id' => $u['id'] ?? null,
+                    'at' => Clock::ms(), 'user_id' => $u['id'] ?? null, 'courier_id' => $r['courier'],
                 ]);
                 if ($r['method'] === 'account') {
                     Accounts::charge($customerId, $r['amount'], $orderId);

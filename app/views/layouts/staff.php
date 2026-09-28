@@ -2,7 +2,8 @@
 /**
  * Staff shell. Desktop (≥1024px): SideNav + page head. Mobile: AppBar, content, action bar or tab bar.
  * Page variables: $title, $sub, $back, $nav, $tab, $appActions[], $headActions, $bottom, $theme,
- * $scripts[], $noTabbar, $noHead, $bodyClass, $appSub (phone subtitle when it differs from the desktop one).
+ * $scripts[], $noTabbar, $noHead, $bodyClass, $appSub (phone subtitle when it differs from the desktop one),
+ * $aside / $asideStart: full-height desktop panels after / before the main column (W10 order panel, C4 customer panel).
  */
 use Sofrexa\Core\I18n;
 use Sofrexa\Core\Settings;
@@ -20,13 +21,15 @@ $appActions ??= [];
 $headActions ??= '';
 $bottom ??= '';
 $scripts ??= [];
+$aside ??= '';
+$asideStart ??= '';
 $tabs = empty($noTabbar) && $bottom === '' ? Shell::tabSet() : null;
 $lang = I18n::lang();
 ?><!doctype html>
 <html lang="<?= e($lang) ?>" dir="<?= I18n::dir() ?>"<?= !empty($theme) && $theme === 'dark' ? ' data-theme="dark"' : '' ?>>
 <?= \Sofrexa\Core\View::partial('partials/head', ['title' => $title ?? '', 'theme' => $theme ?? null, 'scripts' => $scripts]) ?>
 <body class="<?= e($bodyClass ?? '') ?>">
-<div class="shell">
+<div class="shell<?= $aside !== '' ? ' has-aside' : '' ?><?= $asideStart !== '' ? ' has-aside-start' : '' ?>">
 <?php if ($u): ?>
   <aside class="side" aria-label="<?= e(t('nav.aria')) ?>">
     <div class="side__head">
@@ -45,6 +48,8 @@ $lang = I18n::lang();
       <form method="post" action="/logout"><?= csrf_field() ?><button class="ibtn ibtn--s" type="submit" aria-label="<?= e(t('ui.logout')) ?>" title="<?= e(t('ui.logout')) ?>"><?= icon('logout', 20) ?></button></form>
     </div>
   </aside>
+<?php endif ?>
+<?php if ($asideStart !== ''): ?>  <aside class="xpanel xpanel--start"><?= $asideStart ?></aside>
 <?php endif ?>
   <main class="main">
     <header class="appbar">
@@ -66,6 +71,8 @@ $lang = I18n::lang();
     </nav>
     <?php endif ?>
   </main>
+<?php if ($aside !== ''): ?>  <aside class="xpanel"><?= $aside ?></aside>
+<?php endif ?>
 </div>
 <div class="toasts" aria-live="polite"></div>
 </body>

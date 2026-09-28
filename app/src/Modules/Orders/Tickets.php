@@ -144,6 +144,9 @@ final class Tickets
             $p->bold()->pair('Para üstü (TL)', self::tl($change))->bold(false);
         }
         $p->hr()->align('c');
+        if (!empty($o['receipt_note'])) {
+            $p->text((string) $o['receipt_note']);
+        }
         $site = (string) Settings::get('profile.website', '');
         if ($site !== '') {
             $p->qr(rtrim($site, '/') . '/menu', 5)->text('Menü ve görüşleriniz için okutun');

@@ -10,7 +10,7 @@ namespace Sofrexa\Core;
  */
 final class View
 {
-    private const LAYOUT_VARS = ['title', 'sub', 'appTitle', 'appSub', 'back', 'nav', 'tab', 'appActions', 'headActions', 'bottom', 'theme', 'scripts', 'noTabbar', 'noHead', 'bodyClass'];
+    private const LAYOUT_VARS = ['title', 'sub', 'appTitle', 'appSub', 'back', 'nav', 'tab', 'appActions', 'headActions', 'bottom', 'theme', 'scripts', 'noTabbar', 'noHead', 'bodyClass', 'aside', 'asideStart'];
 
     public static function render(string $template, array $data = [], ?string $layout = 'layouts/staff'): string
     {
