@@ -57,7 +57,9 @@ $ctxJson = json_encode(['order' => $o['id'] ?? '', 'table' => $table['id'] ?? ($
     <?php foreach ($cats as $c): ?><?= Ui::chip(tn($c['names']), false, digits($count[$c['id']] ?? 0), ['data-cat' => $c['id']]) ?><?php endforeach ?>
   </div>
   <div class="mtiles mtiles--order" data-menu>
-    <?php foreach ($items as $i):
+    <?php $pch = \Sofrexa\Modules\Menu\Promotions::channelOf((string) ($o['channel'] ?? $ctx['channel'] ?? 'table'));
+    foreach ($items as $i):
+        $i['promo'] = \Sofrexa\Modules\Menu\Promotions::best($i, $pch);
         $search = mb_strtolower(implode(' ', json_arr($i['names'])), 'UTF-8');
         echo OrderUi::menuTile($i, (float) ($incart[$i['id']] ?? 0), [
             'data-cat' => $i['category_id'], 'data-pop' => isset($popular[$i['id']]) ? '1' : null, 'data-q' => $search,

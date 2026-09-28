@@ -43,14 +43,16 @@ $dish = static function (array $i, string $variant) use ($open): string {
     $photo = $i['photo'] ? '<img class="' . ($variant === 'd' ? 'odish__img' : 'dish__img') . '" src="' . e($i['photo']) . '" alt="" loading="lazy">' : '<span class="' . ($variant === 'd' ? 'odish__img' : 'dish__img') . '">' . icon('utensils', 28) . '</span>';
     $ctl = !$i['orderable'] ? Ui::badge(t('qr.soldout'), 'neutral') : ($open ? '<span class="dish__ctl" data-ctl="' . $variant . '"></span>' : '');
     $search = e(mb_strtolower(strtr($i['name'] . ' ' . $i['desc'], ['İ' => 'i', 'I' => 'i', 'ı' => 'i']), 'UTF-8'));
+    $badge = !empty($i['promo']) ? Ui::badge($i['promo'], 'accent') : '';
+    $price = '<span class="dish__price"><span class="t-label-l c-accent num">' . e(money($i['price'])) . '</span>' . (!empty($i['was']) ? ' <s class="t-body-s c-muted num">' . e(money($i['was'])) . '</s>' : '') . '</span>';
     if ($variant === 'd') {
         return '<article class="odish' . ($i['orderable'] ? '' : ' is-soldout') . '" data-dish="' . e($i['id']) . '" data-search="' . $search . '">' . $photo
-            . '<div class="odish__body"><h3 class="t-heading-s">' . e($i['name']) . '</h3>' . ($i['desc'] !== '' ? '<p class="odish__desc t-body-s">' . e($i['desc']) . '</p>' : '')
-            . '<div class="dish__row"><span class="t-label-l c-accent num">' . e(money($i['price'])) . '</span>' . $ctl . '</div></div></article>';
+            . '<div class="odish__body"><div class="dish__head"><h3 class="t-heading-s">' . e($i['name']) . '</h3>' . $badge . '</div>' . ($i['desc'] !== '' ? '<p class="odish__desc t-body-s">' . e($i['desc']) . '</p>' : '')
+            . '<div class="dish__row">' . $price . $ctl . '</div></div></article>';
     }
     return '<article class="dish' . ($i['orderable'] ? '' : ' is-soldout') . '" data-dish="' . e($i['id']) . '" data-search="' . $search . '">' . $photo
-        . '<div class="dish__col"><h3 class="t-heading-s">' . e($i['name']) . '</h3>' . ($i['desc'] !== '' ? '<p class="dish__desc t-body-s">' . e($i['desc']) . '</p>' : '')
-        . '<div class="dish__row"><span class="t-label-l c-accent num">' . e(money($i['price'])) . '</span>' . $ctl . '</div></div></article>';
+        . '<div class="dish__col"><div class="dish__head"><h3 class="t-heading-s">' . e($i['name']) . '</h3>' . $badge . '</div>' . ($i['desc'] !== '' ? '<p class="dish__desc t-body-s">' . e($i['desc']) . '</p>' : '')
+        . '<div class="dish__row">' . $price . $ctl . '</div></div></article>';
 };
 ?>
 <div class="oapp" data-online data-min="<?= OnlineOrders::minOrder() ?>" data-fee="<?= $fee ?>"<?= $open ? '' : ' data-readonly' ?>>

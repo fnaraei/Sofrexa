@@ -47,6 +47,14 @@ return [
         same(14400, Promotions::price(18000, 20));
         same(52000, Promotions::price(65000, 20));
         same(74000, Promotions::price(87000, 15), '₺739,50 → ₺740: whole lira');
+        same(null, Promotions::best(['price' => 0] + $beer, 'table', $at('2026-09-29 18:00')), 'priced by options only');
+        same(null, Promotions::best(['price' => 200] + $beer, 'table', $at('2026-09-29 18:00')), '%20 of ₺2 rounds back to ₺2');
+        // the list wording (Figma PR1): Turkish suffix after the hour, and the day it starts next
+        same(['a', 'ye', 'ya', 'e', 'a'], array_map([Promotions::class, 'trTimeSuffix'], ['19:00', '17:00', '16:00', '13:00', '12:30']));
+        \Sofrexa\Core\I18n::set('tr');
+        same('19:00’a kadar', Promotions::hint($p, $at('2026-09-29 18:00')));
+        same('Bugün 17:00', Promotions::hint($p, $at('2026-09-29 10:00')));
+        same('Pazartesi', Promotions::hint($p, $at('2026-10-03 10:00')));
         foreach ([['name' => '', 'pct' => 0, 'days' => [], 'channels' => []], ['name' => 'X', 'pct' => 10, 'scope' => 'items', 'days' => [1], 'channels' => ['table'], 'time_from' => '10:00']] as $bad) {
             try {
                 Promotions::save($bad);
@@ -66,6 +74,7 @@ return [
         $l = Orders::line(Orders::addItem($o, $s['beer'], 2));
         same([12600, 18000], [(int) $l['unit_price'], (int) $l['list_price']], 'the best one: %30');
         check((bool) $l['promo_id'], 'promotion kept on the line');
+        same(['Salı', 30, 10800], [Promotions::onLine($l)['name'], Promotions::onLine($l)['pct'], Promotions::onLine($l)['saving']], 'OrderLine "Salı %30 · −₺108"');
         same(25200, (int) Orders::get($o)['total']);
         Clock::freeze($at('2026-09-30 18:00'));
         Promotions::flush();

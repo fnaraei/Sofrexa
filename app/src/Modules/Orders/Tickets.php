@@ -123,6 +123,10 @@ final class Tickets
                 }
             }
         }
+        $saved = array_sum(array_map(static fn(array $l): int => $l['status'] === 'void' ? 0 : (\Sofrexa\Modules\Menu\Promotions::onLine($l)['saving'] ?? 0), $o['lines']));
+        if ($saved > 0) {
+            $p->pair('Promosyon tasarrufu (dahil)', self::tl($saved));
+        }
         $p->bold()->size(1, 2)->pair('TOPLAM', self::tl((int) $o['total']))->size()->bold(false);
         foreach (Orders::vat($orderId) as $rate => [$gross, $vat]) {
             if ($vat > 0) {
@@ -296,7 +300,8 @@ final class Tickets
             }
             $qty = Orders::qtyText((float) $l['qty']) . '× ';
             $total = I18n::num(round((float) $l['qty'] * ((int) $l['unit_price'] + (int) $l['mods_price']) / 100, 2), fmod((float) $l['qty'] * ((int) $l['unit_price'] + (int) $l['mods_price']), 100) ? 2 : 0, 'tr');
-            $p->cols([$qty . $l['name'], $total], [$w - 10, -10]);
+            $promo = \Sofrexa\Modules\Menu\Promotions::onLine($l);
+            $p->cols([$qty . $l['name'] . ($promo ? ' · ' . $promo['name_tr'] . ' %' . $promo['pct'] : ''), $total], [$w - 10, -10]);
             $mods = array_column(json_arr($l['mods']), 'name');
             if ($l['note']) {
                 $mods[] = $l['note'];

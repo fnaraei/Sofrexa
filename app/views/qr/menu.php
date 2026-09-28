@@ -44,10 +44,10 @@ $status = '/q/' . rawurlencode($code) . '/status';
             <article class="dish<?= $i['orderable'] ? '' : ' is-soldout' ?>" data-dish="<?= e($i['id']) ?>" data-search="<?= e(mb_strtolower(strtr($i['name'] . ' ' . $i['desc'], ['İ' => 'i', 'I' => 'i', 'ı' => 'i']), 'UTF-8')) ?>">
               <?php if ($i['photo']): ?><img class="dish__img" src="<?= e($i['photo']) ?>" alt="" loading="lazy"><?php else: ?><span class="dish__img"><?= icon('utensils', 28) ?></span><?php endif ?>
               <div class="dish__col">
-                <h3 class="t-heading-s"><?= e($i['name']) ?></h3>
+                <div class="dish__head"><h3 class="t-heading-s"><?= e($i['name']) ?></h3><?php if (!empty($i['promo'])): ?><?= \Sofrexa\View\Ui::badge($i['promo'], 'accent') ?><?php endif ?></div>
                 <?php if ($i['desc'] !== ''): ?><p class="dish__desc t-body-s"><?= e($i['desc']) ?></p><?php endif ?>
                 <div class="dish__row">
-                  <span class="t-label-l c-accent num"><?= e(money($i['price'])) ?></span>
+                  <span class="dish__price"><span class="t-label-l c-accent num"><?= e(money($i['price'])) ?></span><?php if (!empty($i['was'])): ?> <s class="t-body-s c-muted num"><?= e(money($i['was'])) ?></s><?php endif ?></span>
                   <?php if (!$i['orderable']): ?><?= Ui::badge(t('qr.soldout'), 'neutral') ?>
                   <?php elseif (!$readonly): ?><span class="dish__ctl" data-ctl><button type="button" class="dish__add" data-add="<?= e($i['id']) ?>" aria-label="<?= e(t('qr.add')) ?>"><?= icon('plus', 20) ?></button></span><?php endif ?>
                 </div>

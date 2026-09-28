@@ -27,7 +27,7 @@ $bodyClass = 'online-auth';
     <?php if ($turnstile !== ''): ?><div class="cf-turnstile" data-sitekey="<?= e($turnstile) ?>" data-language="<?= e(I18n::lang()) ?>"></div><?php endif ?>
     <?= Ui::btn(t('on.create'), ['type' => 'submit', 'style' => 'accent', 'size' => 'l', 'block' => true]) ?>
   </form>
-  <p class="t-body-s c-muted center"><?= e(t('on.reg_hint')) ?></p>
+  <p class="t-body-s c-muted tcenter"><?= e(t('on.reg_hint')) ?></p>
   <p class="row center-x gap-6"><span class="t-body-s c-secondary"><?= e(t('on.have_account')) ?></span><a class="olink" href="/online/giris<?= $next !== '' ? '?next=' . e(rawurlencode($next)) : '' ?>"><?= e(t('on.sign_in')) ?></a></p>
 </main>
 <?= \Sofrexa\Core\View::partial('online/_auth_desk', ['next' => $next, 'turnstile' => $turnstile]) ?>

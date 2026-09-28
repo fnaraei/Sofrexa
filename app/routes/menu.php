@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Sofrexa\Modules\Menu\MenuController as M;
+use Sofrexa\Modules\Menu\PromotionsController as PC;
 
 $p = ['perm' => 'menu.manage'];
 $router->get('/menu', [M::class, 'index'], $p);
@@ -18,6 +19,15 @@ $router->post('/menu/categories/sort', [M::class, 'sortCategories'], $p);
 $router->post('/menu/categories/{id}/delete', [M::class, 'deleteCategory'], $p);
 $router->post('/menu/groups/save', [M::class, 'saveGroup'], $p);
 $router->post('/menu/groups/{id}/delete', [M::class, 'deleteGroup'], $p);
+
+// time-based promotions (PR1–PR4)
+$router->get('/menu/promotions', [PC::class, 'index'], $p);
+$router->post('/menu/promotions/save', [PC::class, 'save'], $p);
+$router->post('/menu/promotions/preview', [PC::class, 'preview'], $p);
+$router->get('/menu/promotions/{id}/sheet', [PC::class, 'sheet'], $p);
+$router->get('/menu/promotions/{id}', [PC::class, 'edit'], $p);
+$router->post('/menu/promotions/{id}/toggle', [PC::class, 'toggle'], $p);
+$router->post('/menu/promotions/{id}/delete', [PC::class, 'delete'], $p);
 
 $t = ['perm' => 'tables.manage'];
 $router->get('/floor', [M::class, 'floor'], $t);

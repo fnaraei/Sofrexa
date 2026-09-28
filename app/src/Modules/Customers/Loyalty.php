@@ -352,6 +352,11 @@ final class Loyalty
         }
         // points on what was really paid: not on the part paid with points; not on "account" (paid later) when the rule says so
         $amount = (int) Db::value('SELECT COALESCE(SUM(amount), 0) FROM payments WHERE order_id = ?' . (Settings::get('loyalty.no_points_on_account', true) ? " AND method <> 'account'" : ''), [$orderId]);
+        if (Settings::get('loyalty.no_points_on_discounted', true)) {
+            // dishes sold under a promotion are already discounted
+            $amount = max(0, $amount - (int) Db::value("SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items
+                WHERE order_id = ? AND promo_id IS NOT NULL AND status <> 'void' AND deleted = 0", [$orderId]));
+        }
         $points = self::pointsFor($o['customer_id'], $amount);
         if ($points > 0) {
             Db::append('loyalty_ledger', ['customer_id' => $o['customer_id'], 'points' => $points, 'kind' => 'earn', 'order_id' => $orderId, 'at' => Clock::ms(), 'user_id' => Auth::user()['id'] ?? null]);

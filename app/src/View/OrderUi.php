@@ -30,6 +30,7 @@ final class OrderUi
     {
         [$st, $icon, $label] = Board::lineStatus($l);
         $modText = $mods ? Board::lineMods($l) : '';
+        $promo = \Sofrexa\Modules\Menu\Promotions::onLine($l);
         $status = '<span class="oline__status oline__status--' . $st . '">' . ($icon ? icon($icon, 14) : '<i class="oline__dot"></i>') . '<span>' . e($label) . '</span></span>';
         $tag = isset($attrs['data-line']) ? 'button' : 'div';
         if ($tag === 'button') {
@@ -38,7 +39,7 @@ final class OrderUi
         return '<' . $tag . Ui::attrs($attrs + ['class' => 'oline oline--' . $st]) . '>'
             . '<span class="oline__qty num">' . e(Board::qty((float) $l['qty'])) . '</span>'
             . '<span class="oline__mid"><span class="oline__name">' . e($l['name']) . '</span>'
-            . ($modText !== '' ? '<span class="oline__mods">' . e($modText) . '</span>' : '') . $status . '</span>'
+            . ($modText !== '' || $promo ? '<span class="oline__mods">' . ($promo ? '<span class="c-accent">' . e($promo['name'] . ' %' . $promo['pct']) . '</span> · ' . e(money(-$promo['saving'])) . ($modText !== '' ? ' · ' : '') : '') . e($modText) . '</span>' : '') . $status . '</span>'
             . '<span class="oline__price num">' . e(money(Board::lineTotal($l))) . '</span>'
             . '</' . $tag . '>';
     }
@@ -57,9 +58,13 @@ final class OrderUi
         $soldout = !$i['orderable'];
         $cls = 'mtile' . ($soldout ? ' is-soldout' : ($inCart > 0 ? ' is-incart' : ''));
         $qty = $inCart > 0 ? '<span class="mtile__qty num">' . e(digits(\Sofrexa\Modules\Orders\Orders::qtyText($inCart))) . '</span>' : '<span class="mtile__qty">' . icon('plus', 16) . '</span>';
-        return '<button type="button"' . Ui::attrs($attrs + ['class' => $cls, 'data-item' => $i['id']]) . ($soldout ? ' disabled aria-disabled="true"' : '') . '>'
+        $promo = !$soldout ? ($i['promo'] ?? null) : null;
+        $price = $promo ? '<span class="c-accent">' . e(money(\Sofrexa\Modules\Menu\Promotions::price((int) $i['price'], (float) $promo['pct']))) . '</span> <s class="mtile__was">' . e(money((int) $i['price'])) . '</s>'
+            : e(money((int) $i['price']));
+        return '<button type="button"' . Ui::attrs($attrs + ['class' => $cls . ($promo ? ' mtile--promo' : ''), 'data-item' => $i['id']]) . ($soldout ? ' disabled aria-disabled="true"' : '') . '>'
             . '<span class="mtile__name">' . e(tn($i['names'])) . '</span>'
-            . '<span class="mtile__bottom"><span class="mtile__price num">' . ($soldout ? '<span class="c-danger">' . e(t('order.soldout')) . '</span>' : e(money((int) $i['price']))) . '</span>' . $qty . '</span>'
+            . ($promo ? '<span class="mtile__badge">' . Ui::badge(tn($promo['names']), 'accent') . '</span>' : '')
+            . '<span class="mtile__bottom"><span class="mtile__price num">' . ($soldout ? '<span class="c-danger">' . e(t('order.soldout')) . '</span>' : $price) . '</span>' . $qty . '</span>'
             . '</button>';
     }
 

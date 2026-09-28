@@ -151,7 +151,7 @@ final class Ui
     public static function stat(string $label, string $value, array $o = []): string
     {
         $delta = isset($o['delta']) && $o['delta'] !== ''
-            ? '<div class="stat__delta' . (!empty($o['down']) ? ' is-down' : '') . '">' . icon(!empty($o['down']) ? 'arrow-down' : 'trend-up', 14) . '<span>' . e($o['delta']) . '</span></div>' : '';
+            ? '<div class="stat__delta' . (!empty($o['down']) ? ' is-down' : '') . (!empty($o['icon']) ? ' is-plain' : '') . '">' . icon($o['icon'] ?? (!empty($o['down']) ? 'arrow-down' : 'trend-up'), 14) . '<span>' . e($o['delta']) . '</span></div>' : '';
         return '<div class="stat' . (!empty($o['brand']) ? ' stat--brand' : '') . '"' . (isset($o['id']) ? ' id="' . e($o['id']) . '"' : '') . '><div class="stat__label">' . e($label) . '</div><div class="stat__value num">' . e($value) . '</div>' . $delta . '</div>';
     }
 

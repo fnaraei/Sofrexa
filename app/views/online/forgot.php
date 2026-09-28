@@ -15,7 +15,7 @@ $bodyClass = 'online-auth';
 <main class="oform">
   <h1 class="t-display-m only-desktop"><?= e(t('on.forgot')) ?></h1>
   <?php if (!$sent): ?>
-    <p class="t-body-m c-secondary center"><?= e(t('on.forgot_text')) ?></p>
+    <p class="t-body-m c-secondary tcenter"><?= e(t('on.forgot_text')) ?></p>
     <form class="oauth__form" method="post" action="/online/sifre" data-ajax data-toast="off" data-online-form>
       <?= csrf_field() ?>
       <?= Ui::field('email', ['id' => 'f-email', 'label' => t('on.email'), 'icon' => 'mail', 'type' => 'email', 'autocomplete' => 'username', 'value' => $email]) ?>
@@ -25,7 +25,7 @@ $bodyClass = 'online-auth';
     <div class="banner banner--success" role="status"><?= icon('mail', 20) ?><div class="col gap-2"><div class="banner__title"><?= e(t('on.code_sent')) ?></div><div class="banner__text"><?= e(t('on.code_sent_text', ['email' => $email])) ?></div></div></div>
     <form class="oauth__form" method="post" action="/online/sifre/yeni" data-ajax data-toast="off" data-online-form>
       <?= csrf_field() ?>
-      <div class="overline center"><?= e(t('on.code')) ?></div>
+      <div class="overline tcenter"><?= e(t('on.code')) ?></div>
       <?= \Sofrexa\Core\View::partial('online/_code') ?>
       <?= Ui::field('password', ['id' => 'f-pw', 'label' => t('on.new_pw'), 'icon' => 'lock', 'type' => 'password', 'autocomplete' => 'new-password', 'attrs' => ['data-pw-rule' => '#f-rule']]) ?>
       <p class="t-body-s c-muted opwrule" id="f-rule"><?= e(t('on.pw_rule')) ?></p>

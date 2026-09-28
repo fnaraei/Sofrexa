@@ -25,6 +25,7 @@ $rows = array_map(static fn(array $i): array => [
 ], $items);
 $fmtStock = static fn(?int $s): string => $s === null ? '—' : digits($s);
 ?>
+<?= \Sofrexa\Core\View::partial('menu/_tabs', ['active' => '/menu/quick']) ?>
 <div class="quick" data-quick data-rows='<?= e(json_encode($rows, JSON_UNESCAPED_UNICODE)) ?>'
      data-l-save="<?= e(t('quick.save_n', ['n' => '{n}'])) ?>" data-l-save0="<?= e(t('quick.save')) ?>" data-l-unlimited="<?= e(t('quick.unlimited')) ?>"
      data-l-on="<?= e(t('quick.s_on')) ?>" data-l-low="<?= e(t('quick.s_low')) ?>" data-l-out="<?= e(t('quick.s_out')) ?>" data-l-off="<?= e(t('quick.s_off')) ?>"

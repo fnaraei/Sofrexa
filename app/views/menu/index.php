@@ -24,6 +24,7 @@ foreach ($categories as $c) {
 }
 $webqr = static fn(array $i): string => '<span class="webqr">' . icon($i['show_web'] ? 'eye' : 'eye-off', 18, $i['show_web'] ? 'c-ok' : 'c-off') . icon('qr', 18, $i['show_qr'] ? 'c-ok' : 'c-off') . '</span>';
 ?>
+<?= \Sofrexa\Core\View::partial('menu/_tabs', ['active' => '/menu']) ?>
 <div class="menuwrap">
   <nav class="catpanel only-desktop" aria-label="<?= e(t('menu.categories')) ?>">
     <a class="catpanel__row<?= $cat === '' ? ' is-active' : '' ?>" href="<?= e($keep(['c' => null])) ?>"><span><?= e(t('menu.all')) ?></span><b><?= e(digits($total)) ?></b></a>
