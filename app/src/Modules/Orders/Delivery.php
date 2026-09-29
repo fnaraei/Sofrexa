@@ -22,8 +22,6 @@ final class Delivery
 {
     public const CHANNELS = ['delivery', 'takeaway', 'online'];
     public const FEE_NAME = 'Teslimat ücreti';
-    /** How far back a paid bag not yet handed over is still looked for on the board. */
-    public const PAID_WINDOW_MS = 12 * 3_600_000;
 
     /** The delivery fee as a line of its own that never goes to the kitchen (phone and online delivery alike, audit 7 E01). */
     public static function addFee(string $orderId): void
@@ -55,7 +53,7 @@ final class Delivery
     public static function handedOver(array $o): bool
     {
         $d = is_array($o['delivery'] ?? null) ? $o['delivery'] : json_arr($o['delivery'] ?? null);
-        if (($d['stage'] ?? '') === 'done') {
+        if (($d['stage'] ?? '') === 'done' || !empty($o['handed_at'] ?? Db::value('SELECT handed_at FROM orders WHERE id = ?', [$o['id']]))) {
             return true;
         }
         if (self::isDelivery($o)) {
@@ -157,11 +155,26 @@ final class Delivery
         return (bool) Db::value("SELECT 1 FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND r.code = 'courier' AND u.active = 1 AND u.deleted = 0", [$userId]);
     }
 
-    /** Takeaway, delivery and online orders on the board with their stage: the open ones, and the paid ones not handed over yet. */
+    /**
+     * A paid bag handed over is marked so (handed_at): the board stops looking at it. Called where that can happen — the
+     * courier's "Teslim edildi", the last dish carried out at the counter, a bill paid after its bag went.
+     */
+    public static function noteHanded(string $orderId): void
+    {
+        $o = Db::row('SELECT id, channel, status, delivery, handed_at FROM orders WHERE id = ?', [$orderId]);
+        if ($o && !$o['handed_at'] && $o['status'] === 'paid' && in_array($o['channel'], self::CHANNELS, true) && self::handedOver($o)) {
+            Db::save('orders', ['id' => $orderId, 'handed_at' => Clock::ms()]);
+        }
+    }
+
+    /**
+     * Takeaway, delivery and online orders on the board with their stage: the open ones, and the paid ones not handed over
+     * yet — however long ago they were paid (audit 9, R05; decision 54).
+     */
     public static function open(): array
     {
         $out = [];
-        $paid = array_filter(Orders::open(self::CHANNELS, ['paid'], Clock::ms() - self::PAID_WINDOW_MS), static fn(array $o): bool => !self::handedOver($o));
+        $paid = array_filter(Orders::open(self::CHANNELS, ['paid'], true), static fn(array $o): bool => !self::handedOver($o));
         foreach ([...Orders::open(self::CHANNELS), ...$paid] as $o) {
             $o['delivery'] = json_arr($o['delivery']);
             $o['stage'] = self::stage($o);
@@ -199,6 +212,13 @@ final class Delivery
 
     /** Moves an order along: approve (pending → kitchen), ready, way (out with the courier), done (delivered). */
     public static function move(string $orderId, string $to): void
+    {
+        // one write lock: where the bag is, what is still cooking and the step taken — a dish added or a courier set at
+        // the same moment is either seen or waits (audit 9, R02)
+        Db::tx(static fn() => self::moveLocked($orderId, $to));
+    }
+
+    private static function moveLocked(string $orderId, string $to): void
     {
         $o = $to === 'approve' ? Orders::editable($orderId) : self::order($orderId);
         $d = $o['delivery'];
@@ -258,13 +278,16 @@ final class Delivery
 
     public static function assign(string $orderId, ?string $courierId): void
     {
-        $o = self::order($orderId);
         if ($courierId && !self::isCourier($courierId)) {
             throw new \Sofrexa\Core\HttpError(404);
         }
-        $d = $o['delivery'];
-        $d['courier_id'] = $courierId;
-        Db::save('orders', ['id' => $orderId, 'delivery' => $d]);
+        // read and written in one lock: the bag's record also holds its stage, and a step taken at the same moment must
+        // not be written back over
+        Db::tx(static function () use ($orderId, $courierId): void {
+            $d = self::order($orderId)['delivery'];
+            $d['courier_id'] = $courierId;
+            Db::save('orders', ['id' => $orderId, 'delivery' => $d]);
+        });
     }
 
     /** Couriers with today's count, whether they are out, and the cash they hold (delivered, not yet settled). */

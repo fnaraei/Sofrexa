@@ -154,17 +154,23 @@ final class Shifts
     /** Closes the shift with the counted cash per currency; prints the Z report. Returns the Z number. */
     public static function close(array $counted, string $note = ''): int
     {
-        $s = self::current();
-        if (!$s) {
-            throw new \InvalidArgumentException(I18n::t('shift.err_none'));
-        }
-        $open = (int) Db::value("SELECT COUNT(*) FROM orders WHERE shift_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0", [$s['id']]);
-        if ($open > 0 && !Auth::can('*')) {
-            throw new \InvalidArgumentException(I18n::t('shift.err_open_orders', ['n' => $open]));
-        }
-        $sum = self::summary($s['id']);
-        $z = (int) Db::value('SELECT COALESCE(MAX(z_no), 0) + 1 FROM shifts');
-        Db::save('shifts', ['id' => $s['id'], 'closed_at' => Clock::ms(), 'counted' => $counted, 'expected' => $sum['cash'], 'z_no' => $z, 'note' => json_encode(json_arr($s['note']) + ['close' => $note], JSON_UNESCAPED_UNICODE)]);
+        \Sofrexa\Core\Router::tillOnly();
+        // the figures and the closing in one write lock: a payment either lands before and is counted, or finds no shift
+        // open and is refused — never money booked into a shift after its Z was worked out (audit 9, R01)
+        [$s, $sum, $z] = Db::tx(static function () use ($counted, $note): array {
+            $s = self::current();
+            if (!$s) {
+                throw new \InvalidArgumentException(I18n::t('shift.err_none'));
+            }
+            $open = (int) Db::value("SELECT COUNT(*) FROM orders WHERE shift_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0", [$s['id']]);
+            if ($open > 0 && !Auth::can('*')) {
+                throw new \InvalidArgumentException(I18n::t('shift.err_open_orders', ['n' => $open]));
+            }
+            $sum = self::summary($s['id']);
+            $z = (int) Db::value('SELECT COALESCE(MAX(z_no), 0) + 1 FROM shifts');
+            Db::save('shifts', ['id' => $s['id'], 'closed_at' => Clock::ms(), 'counted' => $counted, 'expected' => $sum['cash'], 'z_no' => $z, 'note' => json_encode(json_arr($s['note']) + ['close' => $note], JSON_UNESCAPED_UNICODE)]);
+            return [$s, $sum, $z];
+        });
         $diff = (int) ($counted['TRY'] ?? 0) - (int) $sum['cash']['TRY'];
         Audit::log('shift.close', 'Z ' . $z . ' · sayılan ' . Money::fmt((int) ($counted['TRY'] ?? 0), false, 'tr') . ' · fark ' . Money::fmt($diff, true, 'tr'), 'shift', $s['id']);
         Tickets::zReport($s['id']);

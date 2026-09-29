@@ -30,7 +30,7 @@ $str = ['new' => t('pur.new_item', ['q' => '{q}']), 'remove' => t('pur.remove'),
   <section class="card purhead">
     <?= Ui::select('supplier_id', $sup, '', ['label' => t('pur.supplier'), 'icon' => 'store', 'attrs' => ['data-supplier' => true]]) ?>
     <?= Ui::field('doc_no', ['label' => t('pur.doc_no'), 'icon' => 'file-text']) ?>
-    <?= Ui::field('day', ['label' => t('pur.date'), 'icon' => 'calendar', 'type' => 'date', 'value' => date('Y-m-d')]) ?>
+    <?= Ui::field('day', ['label' => t('pur.date'), 'icon' => 'calendar', 'type' => 'date', 'value' => \Sofrexa\Modules\Orders\Orders::businessDay()]) ?>
     <?= Ui::select('pay', $pay, 'credit:15', ['label' => t('pur.pay'), 'icon' => 'wallet']) ?>
   </section>
   <section class="card card--pad0 purlines">

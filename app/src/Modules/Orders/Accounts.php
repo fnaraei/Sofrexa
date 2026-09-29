@@ -55,13 +55,14 @@ final class Accounts
         if ($amount <= 0) {
             throw new ValidationError(['amount' => I18n::t('cust.err_amount')]);
         }
-        $shift = $method === 'transfer' ? null : Shifts::forCash(); // the drawer or the card machine: the till's
+        $method === 'transfer' ? null : Shifts::forCash(); // the drawer or the card machine: the till's
         $name = (string) Db::value('SELECT name FROM customers WHERE id = ? AND deleted = 0', [$customerId]);
         if ($name === '') {
             throw new HttpError(404);
         }
         $uid = Auth::user()['id'] ?? null;
-        Db::tx(static function () use ($customerId, $amount, $method, $note, $shift, $uid): void {
+        Db::tx(static function () use ($customerId, $amount, $method, $note, $uid): void {
+            $shift = $method === 'transfer' ? null : Shifts::forCash(); // read inside the lock: a shift closed a moment ago takes nothing
             Db::append('account_ledger', ['customer_id' => $customerId, 'amount' => -$amount, 'kind' => 'payment', 'method' => $method, 'note' => mb_substr(trim($note), 0, 200) ?: null, 'at' => Clock::ms(), 'user_id' => $uid]);
             Db::append('payments', ['order_id' => null, 'shift_id' => $shift, 'method' => $method, 'currency' => 'TRY', 'amount_fx' => 0, 'rate' => 1, 'amount' => $amount, 'change_given' => 0,
                 'customer_id' => $customerId, 'at' => Clock::ms(), 'user_id' => $uid, 'note' => 'hesap ödemesi']);

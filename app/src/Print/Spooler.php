@@ -40,25 +40,20 @@ final class Spooler
         $now = Clock::ms();
         Db::exec("UPDATE print_jobs SET status = 'expired' WHERE kind = 'drawer' AND status IN ('queued', 'retry') AND at < ?", [$now - self::DRAWER_TTL_MS]);
         $n = 0;
-        $down = [];
-        foreach (Db::rows("SELECT * FROM print_jobs WHERE status IN ('queued', 'retry') ORDER BY at, rowid LIMIT 200") as $job) {
-            // each printer prints its tickets in the order they were made (audit 8, O16): while its oldest waiting ticket
-            // is paused for a retry, the newer ones wait behind it — a cancellation never comes out before the order it
-            // cancels — and a printer that just failed is not tried again in this pass. Other printers go on.
-            if (isset($down[$job['printer']])) {
-                continue;
-            }
-            if ($job['next_at'] !== null && (int) $job['next_at'] > $now) {
-                $down[$job['printer']] = true;
-                continue;
-            }
-            if (self::run($job)) {
+        // one queue per physical printer (the bar and courier tickets go to the printer they are set to): each prints its
+        // tickets in the order they were made — while its oldest waiting ticket is paused for a retry, the newer ones wait
+        // behind it, so a cancellation never comes out before its order (audit 8 O16, audit 9 R07) — and each queue is
+        // read on its own, so however many tickets pile up for a printer that is off, the others print (R04)
+        $queues = [];
+        foreach (array_column(Db::rows("SELECT DISTINCT printer FROM print_jobs WHERE status IN ('queued', 'retry')"), 'printer') as $name) {
+            $queues[Printer::resolve((string) $name)][] = (string) $name;
+        }
+        foreach ($queues as $names) {
+            foreach (Db::rows("SELECT * FROM print_jobs WHERE status IN ('queued', 'retry') AND printer IN (" . Db::in($names) . ') ORDER BY at, rowid LIMIT 20', $names) as $job) {
+                if (($job['next_at'] !== null && (int) $job['next_at'] > $now) || !self::run($job)) {
+                    break; // waiting for its retry, or just failed: nothing behind it goes first
+                }
                 $n++;
-            } else {
-                $down[$job['printer']] = true;
-            }
-            if ($n >= 20) {
-                break;
             }
         }
         // CAST: PDO sends numbers as text, and SQLite only turns them back into numbers next to a plain column

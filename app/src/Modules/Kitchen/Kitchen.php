@@ -249,6 +249,7 @@ final class Kitchen
             Db::save('order_items', ['id' => $l['id'], 'status' => 'served', 'served_at' => Clock::ms()]);
         }
         self::announce($orderId); // carried out: off the alert, whichever way they were handed over
+        \Sofrexa\Modules\Orders\Delivery::noteHanded($orderId);
     }
 
     private static function open(string $orderId, int $round, string $station): array

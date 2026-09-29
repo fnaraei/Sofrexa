@@ -56,10 +56,10 @@ final class Orders
         return $id ? self::get($id) : null;
     }
 
-    /** All open orders with totals and line counts (till list, table map); $statuses and $closedSince for the delivery board. */
-    public static function open(array $channels = [], array $statuses = self::OPEN, int $closedSince = 0): array
+    /** All open orders with totals and line counts (till list, table map); $statuses and $notHanded for the delivery board. */
+    public static function open(array $channels = [], array $statuses = self::OPEN, bool $notHanded = false): array
     {
-        $where = 'o.status IN (' . Db::in($statuses) . ') AND o.deleted = 0' . ($closedSince ? ' AND o.closed_at >= ' . $closedSince : '');
+        $where = 'o.status IN (' . Db::in($statuses) . ') AND o.deleted = 0' . ($notHanded ? ' AND o.handed_at IS NULL' : '');
         $p = $statuses;
         if ($channels) {
             $where .= ' AND o.channel IN (' . Db::in($channels) . ')';
@@ -125,6 +125,13 @@ final class Orders
      */
     public static function addItem(string $orderId, string $itemId, float $qty = 1, array $mods = [], string $note = ''): string
     {
+        // one write lock: the bill, where its bag is and the daily stock are read where the line is written, so a dish
+        // cannot join a bag the courier took out at the same moment (audit 9, R02)
+        return Db::tx(static fn(): string => self::addItemLocked($orderId, $itemId, $qty, $mods, $note));
+    }
+
+    private static function addItemLocked(string $orderId, string $itemId, float $qty, array $mods, string $note): string
+    {
         $o = self::editable($orderId);
         self::notLeft($o);
         $item = Menu::get($itemId);
@@ -144,8 +151,7 @@ final class Orders
         $same = Db::value("SELECT id FROM order_items WHERE order_id = ? AND item_id = ? AND status = 'new' AND deleted = 0 AND mods = ? AND COALESCE(note, '') = ? AND unit_price = ?",
             [$orderId, $itemId, json_encode($modRows, JSON_UNESCAPED_UNICODE), $note, $unit]);
         if ($same) {
-            Db::exec('UPDATE order_items SET qty = qty + ?, updated_at = ? WHERE id = ?', [$qty, Clock::ms(), $same]);
-            \Sofrexa\Core\Sync::touch('order_items', $same);
+            Db::save('order_items', ['id' => $same, 'qty' => (float) Db::value('SELECT qty FROM order_items WHERE id = ?', [$same]) + $qty]);
             self::recalc($orderId);
             return $same;
         }
@@ -392,8 +398,9 @@ final class Orders
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
         $target = self::editable($orderId);
-        self::notLeft($target);
-        $lineId = Db::tx(static function () use ($voidId, $target): string {
+        $lineId = Db::tx(static function () use ($voidId, $orderId): string {
+            $target = self::editable($orderId);
+            self::notLeft($target); // read inside the lock, as in addItem
             $v = self::voidedDish($voidId);
             $now = Clock::ms();
             $id = Db::save('order_items', ['order_id' => $target['id'], 'item_id' => $v['item_id'], 'name' => $v['name'], 'qty' => (float) $v['qty'],
@@ -543,12 +550,13 @@ final class Orders
     {
         $from = self::editable($fromId);
         $into = self::editable($intoId);
-        self::notLeft($from);
-        self::notLeft($into);
         Db::tx(static function () use ($fromId, $intoId, &$from, &$into): void {
-            // both bills read again inside the lock: a payment taken on the merged-away bill at the same moment is seen
+            // both bills read again inside the lock: a payment taken on the merged-away bill at the same moment is seen,
+            // and so is a bag taken out
             $from = self::editable($fromId);
             $into = self::editable($intoId);
+            self::notLeft($from);
+            self::notLeft($into);
             if ((int) $from['paid'] > 0) {
                 throw new \InvalidArgumentException(I18n::t('order.err_has_payments'));
             }
@@ -630,6 +638,7 @@ final class Orders
         }
         $new = Db::tx(static function () use ($orderId, $lines): string {
             $o = self::editable($orderId); // what was paid, read inside the lock
+            self::notLeft($o);
             $ids = array_column($lines, 'id');
             $sub = (int) Db::value("SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE order_id = ? AND deleted = 0 AND status <> 'void'", [$orderId]);
             $moved = (int) Db::value('SELECT COALESCE(SUM(ROUND(qty * (unit_price + mods_price))), 0) FROM order_items WHERE id IN (' . Db::in($ids) . ')', $ids);
@@ -763,14 +772,17 @@ final class Orders
         }
         \Sofrexa\Core\Router::tillOnly(); // taking money is the till's work, from whatever page
         // cash and card go into a shift (the drawer, the card machine); a bill put on account moves no money
-        $shift = array_filter($parts, static fn(array $p): bool => in_array($p['method'] ?? 'cash', ['cash', 'card'], true)) ? Shifts::forCash() : Shifts::currentId();
+        $money = (bool) array_filter($parts, static fn(array $p): bool => in_array($p['method'] ?? 'cash', ['cash', 'card'], true));
+        $money ? Shifts::forCash() : null;
         if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId])) {
             self::send($orderId);
         }
         $rates = Rates::latest();
         $u = Auth::user();
-        // one step, read inside the lock: two tills taking the last payment of a bill at once cannot both take it
-        return Db::tx(static function () use ($orderId, $parts, $customerId, $receipt, $limit, $shift, $rates, $u): array {
+        // one step, read inside the lock: two tills taking the last payment of a bill at once cannot both take it, and the
+        // shift is the one open inside that lock — a shift closed a moment before takes no payment (audit 9, R01)
+        return Db::tx(static function () use ($orderId, $parts, $customerId, $receipt, $limit, $money, $rates, $u): array {
+            $shift = $money ? Shifts::forCash() : Shifts::currentId();
             $o = self::get($orderId);
             if (!in_array($o['status'], self::OPEN, true)) {
                 throw new \InvalidArgumentException(I18n::t('order.err_closed'));
@@ -808,12 +820,13 @@ final class Orders
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
         $method = $method === 'card' ? 'card' : 'cash';
-        $shift = Shifts::forCash();
+        Shifts::forCash();
         if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId])) {
             self::send($orderId);
         }
         $u = Auth::user();
-        [$o, $plan] = Db::tx(static function () use ($orderId, $method, $shift, $u): array {
+        [$o, $plan] = Db::tx(static function () use ($orderId, $method, $u): array {
+            $shift = Shifts::forCash(); // the shift open inside the lock (audit 9, R01)
             $o = self::get($orderId);
             if (!in_array($o['status'], self::OPEN, true)) {
                 throw new \InvalidArgumentException(I18n::t('order.err_closed'));
@@ -990,6 +1003,7 @@ final class Orders
             \Sofrexa\Modules\QrOrder\QrOrders::closeSessions(Db::value('SELECT table_id FROM orders WHERE id = ?', [$orderId]));
         }
         self::ended($orderId); // a table's plates were carried out: no alert left, whoever closed it
+        Delivery::noteHanded($orderId); // a bag paid after it went
         \Sofrexa\Modules\Customers\Loyalty::settle($orderId);
         \Sofrexa\Modules\Customers\Loyalty::earn($orderId);
     }

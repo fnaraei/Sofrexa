@@ -17,7 +17,7 @@ $bottom = '<div class="grow col" style="gap:0"><span class="t-label-m c-warning"
     . Ui::btn(t('cnt.finish'), ['size' => 'l', 'icon' => 'check', 'class' => 'btn--hug', 'type' => 'submit', 'attrs' => ['form' => 'count-form']]);
 $str = ['sub' => t('cnt.sub', ['loc' => $loc !== '' ? $loc : t('cnt.all'), 'a' => '{a}', 'b' => '{b}']), 'one' => t('cnt.diff', ['q' => '{q}', 'unit' => '{unit}', 'name' => '{name}']), 'many' => t('cnt.diff_many', ['n' => '{n}']), 'none' => t('cnt.no_diff')];
 ?>
-<form class="count" id="count-form" method="post" action="/stock/count" data-count data-key="<?= e('count:' . date('Y-m-d') . ':' . $loc) ?>" data-str='<?= e(json_encode($str, JSON_UNESCAPED_UNICODE)) ?>'>
+<form class="count" id="count-form" method="post" action="/stock/count" data-count data-key="<?= e('count:' . \Sofrexa\Modules\Orders\Orders::businessDay() . ':' . $loc) ?>" data-str='<?= e(json_encode($str, JSON_UNESCAPED_UNICODE)) ?>'>
   <?= csrf_field() ?>
   <input type="hidden" name="loc" value="<?= e($loc) ?>">
   <div class="progress"><span class="progress__fill" data-progress style="width:0"></span></div>

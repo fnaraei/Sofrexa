@@ -47,9 +47,9 @@ final class Auth
             if ($uid) {
                 $u = Db::row('SELECT u.*, r.code AS role_code, r.name AS role_name, r.perms AS role_perms FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.active = 1 AND u.deleted = 0', [$uid]);
                 // the session remembers the credentials it was opened with (PIN and password), so a new PIN or password
-                // ends every session opened with the old one — a PIN someone saw stops working on their phone too
-                // (a session from before this rule kept only the password hash: it is checked that way, once)
-                $ok = $u && (isset($_SESSION['cv']) ? hash_equals($_SESSION['cv'], self::credentials($u)) : $u['password_hash'] === ($_SESSION['pwv'] ?? $u['password_hash']));
+                // ends every session opened with the old one — a PIN someone saw stops working on their phone too. A session
+                // with no such stamp (opened before this rule) cannot show which PIN opened it: it signs in again, once.
+                $ok = $u && is_string($_SESSION['cv'] ?? null) && hash_equals($_SESSION['cv'], self::credentials($u));
                 if ($ok) {
                     $_SESSION['cv'] = self::credentials($u);
                     self::$user = self::withPerms($u);

@@ -129,8 +129,12 @@ final class Users
         $u = self::get($id);
         Perms::requireManage($u);
         $pin = self::newPin();
-        // a new PIN signs out every device that used the old one (Auth compares the session's credentials)
-        Db::save('users', ['id' => $id, 'pin_hash' => Auth::hashPin($pin), 'failed_pins' => 0, 'locked_until' => 0]);
+        // a new PIN signs out every device that used the old one (Auth compares the session's credentials), and ends the
+        // password links still out (decision 55)
+        Db::tx(static function () use ($id, $pin): void {
+            Db::save('users', ['id' => $id, 'pin_hash' => Auth::hashPin($pin), 'failed_pins' => 0, 'locked_until' => 0]);
+            self::dropLinks($id);
+        });
         Audit::log('user.reset_pin', $u['name'], 'user', $id);
         return $pin;
     }
@@ -191,19 +195,26 @@ final class Users
     public static function setPassword(array $reset, string $password): void
     {
         Db::tx(static function () use ($reset, $password): void {
-            if (Db::exec('UPDATE password_resets SET used_at = ? WHERE id = ? AND used_at IS NULL AND deleted = 0 AND expires_at > ?', [Clock::ms(), $reset['reset_id'], Clock::ms()]) !== 1) {
+            if (!Db::value('SELECT 1 FROM password_resets WHERE id = ? AND used_at IS NULL AND deleted = 0 AND expires_at > ?', [$reset['reset_id'], Clock::ms()])) {
                 throw new \InvalidArgumentException(I18n::t('pw.invalid'));
             }
+            // written as every replicated row is (Db::save): the other copy learns the link is used, and a later version
+            Db::save('password_resets', ['id' => $reset['reset_id'], 'used_at' => Clock::ms()]);
             Db::save('users', ['id' => $reset['id'], 'password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
             self::dropLinks($reset['id']);
         });
         Audit::log('user.password_set', $reset['name'], 'user', $reset['id'], [], $reset);
     }
 
-    /** Ends every password link of an account not used yet (a new link, a password set, the e-mail changed, deactivated). */
+    /**
+     * Ends every password link of an account not used yet (a new link, a new password or PIN, the e-mail changed,
+     * deactivated) — on both copies: each one ended as a replicated row, never by a bare UPDATE the other side never sees.
+     */
     private static function dropLinks(string $userId): void
     {
-        Db::exec('UPDATE password_resets SET deleted = 1 WHERE user_id = ? AND used_at IS NULL AND deleted = 0', [$userId]);
+        foreach (Db::rows('SELECT id FROM password_resets WHERE user_id = ? AND used_at IS NULL AND deleted = 0', [$userId]) as $r) {
+            Db::softDelete('password_resets', $r['id']);
+        }
     }
 
     public static function strongEnough(string $pw): bool

@@ -33,7 +33,7 @@ $bottom = Ui::btn(t($kind === 'income' ? 'fin.save_income' : 'fin.save_expense')
   </div>
   <?= Ui::field('description', ['label' => t('fin.c_desc'), 'icon' => 'note']) ?>
   <div class="row gap-10 end-a">
-    <div class="finform__date"><?= Ui::field('day', ['label' => t('cust.c_date'), 'icon' => 'calendar', 'type' => 'date', 'value' => date('Y-m-d')]) ?></div>
+    <div class="finform__date"><?= Ui::field('day', ['label' => t('cust.c_date'), 'icon' => 'calendar', 'type' => 'date', 'value' => \Sofrexa\Modules\Orders\Orders::businessDay()]) ?></div>
     <div class="col grow" style="gap:6px"><span class="field__label"><?= e(t('fin.c_pay')) ?></span>
       <?= Ui::segs(['cash' => t('fin.m.cash_from'), 'bank' => t('fin.m.bank'), 'card' => t('fin.m.card')], $shift ? 'cash' : 'bank', 'method') ?></div>
   </div>

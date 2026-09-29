@@ -363,8 +363,10 @@ final class Staff
      */
     public static function termsFor(array $u, string $month): array
     {
-        $t = Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? AND from_month <= ? ORDER BY from_month DESC, at DESC, rowid DESC LIMIT 1', [$u['id'], $month])
-            ?? Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? ORDER BY from_month, at, rowid LIMIT 1', [$u['id']])
+        // by the time the change was made (the profile's own updated_at, the same on both copies — 021), up to the month's end
+        $end = (int) strtotime(date('Y-m-01', (int) strtotime(preg_match('/^\d{4}-\d{2}$/', $month) ? $month . '-01' : 'now')) . ' +1 month') * 1000;
+        $t = Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? AND at < ? ORDER BY at DESC, rowid DESC LIMIT 1', [$u['id'], $end])
+            ?? Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? ORDER BY at, rowid LIMIT 1', [$u['id']])
             ?? $u;
         return ['base_salary' => (int) $t['base_salary'], 'commission_pct' => (float) $t['commission_pct'], 'pay_basis' => $t['pay_basis'] ?? null, 'per_delivery' => (int) $t['per_delivery']];
     }
