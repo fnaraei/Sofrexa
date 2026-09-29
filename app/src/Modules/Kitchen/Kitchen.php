@@ -103,13 +103,16 @@ final class Kitchen
     /** "Başla": New → Cooking. */
     public static function start(string $orderId, int $round, string $station): int
     {
-        $lines = self::open($orderId, $round, $station);
-        foreach ($lines as $l) {
-            if (!$l['started_at']) {
-                Db::save('order_items', ['id' => $l['id'], 'started_at' => Clock::ms()]);
+        // read and written in one lock: a plate voided, sent or carried out a moment ago is seen, never written over
+        return Db::tx(static function () use ($orderId, $round, $station): int {
+            $lines = self::open($orderId, $round, $station);
+            foreach ($lines as $l) {
+                if (!$l['started_at']) {
+                    Db::save('order_items', ['id' => $l['id'], 'started_at' => Clock::ms()]);
+                }
             }
-        }
-        return count($lines);
+            return count($lines);
+        });
     }
 
     // ------------------------------------------------------------ the "food is ready" alert (decision 49)
@@ -124,42 +127,51 @@ final class Kitchen
     /** Tap on an item: plated (ready) or back. The ticket's last item works like "Hazır". */
     public static function toggleLine(string $lineId): string
     {
-        $l = Db::row('SELECT * FROM order_items WHERE id = ? AND deleted = 0', [$lineId]);
-        if (!$l || !in_array($l['status'], ['sent', 'ready'], true)) {
-            throw new \Sofrexa\Core\HttpError(404);
-        }
-        if ($l['status'] === 'ready') {
-            Db::save('order_items', ['id' => $lineId, 'status' => 'sent', 'ready_at' => null, 'called_at' => null]);
-            self::announce($l['order_id']);
-            return 'sent';
-        }
-        if (count(self::open($l['order_id'], (int) $l['round'], $l['station'])) <= 1) {
-            self::ready($l['order_id'], (int) $l['round'], $l['station']);
+        // read and written in one lock: a plate voided, sent or carried out a moment ago is seen, never written over
+        return Db::tx(static function () use ($lineId): string {
+            $l = Db::row('SELECT * FROM order_items WHERE id = ? AND deleted = 0', [$lineId]);
+            if (!$l || !in_array($l['status'], ['sent', 'ready'], true)) {
+                throw new \Sofrexa\Core\HttpError(404);
+            }
+            if ($l['status'] === 'ready') {
+                Db::save('order_items', ['id' => $lineId, 'status' => 'sent', 'ready_at' => null, 'called_at' => null]);
+                self::announce($l['order_id']);
+                return 'sent';
+            }
+            if (count(self::open($l['order_id'], (int) $l['round'], $l['station'])) <= 1) {
+                self::ready($l['order_id'], (int) $l['round'], $l['station']);
+                return 'ready';
+            }
+            // plated, not called: the waiter hears about it with the rest of the ticket
+            Db::save('order_items', ['id' => $lineId, 'status' => 'ready', 'ready_at' => Clock::ms(), 'started_at' => $l['started_at'] ?: Clock::ms()]);
             return 'ready';
-        }
-        // plated, not called: the waiter hears about it with the rest of the ticket
-        Db::save('order_items', ['id' => $lineId, 'status' => 'ready', 'ready_at' => Clock::ms(), 'started_at' => $l['started_at'] ?: Clock::ms()]);
-        return 'ready';
+        });
     }
 
     /** "Hazır": every open line of the ticket is ready, the ticket's plates are called and the waiter is told. Returns the lines marked. */
     public static function ready(string $orderId, int $round, string $station): int
     {
-        $open = self::open($orderId, $round, $station);
-        $now = Clock::ms();
-        Db::tx(static function () use ($open, $now): void {
-            foreach ($open as $l) {
-                Db::save('order_items', ['id' => $l['id'], 'status' => 'ready', 'ready_at' => $now, 'started_at' => $l['started_at'] ?: $now]);
-            }
+        // read and written in one lock: a plate voided, sent or carried out a moment ago is seen, never written over
+        return Db::tx(static function () use ($orderId, $round, $station): int {
+            $open = self::open($orderId, $round, $station);
+            $now = Clock::ms();
+            Db::tx(static function () use ($open, $now): void {
+                foreach ($open as $l) {
+                    Db::save('order_items', ['id' => $l['id'], 'status' => 'ready', 'ready_at' => $now, 'started_at' => $l['started_at'] ?: $now]);
+                }
+            });
+            self::call($orderId, $round, $station);
+            return count($open);
         });
-        self::call($orderId, $round, $station);
-        return count($open);
     }
 
     /** "Garsonu tekrar çağır": the ticket's ready plates called again, and the alert rings again. */
     public static function callAgain(string $orderId, int $round, string $station): void
     {
-        self::call($orderId, $round, $station);
+        // read and written in one lock: a plate voided, sent or carried out a moment ago is seen, never written over
+        Db::tx(static function () use ($orderId, $round, $station): void {
+            self::call($orderId, $round, $station);
+        });
     }
 
     private static function call(string $orderId, int $round, string $station): void
@@ -174,15 +186,18 @@ final class Kitchen
     /** Undo "Hazır" (a wrong tap) while the plates are still in the kitchen: back to cooking, and no longer called. */
     public static function recall(string $orderId, int $round, string $station): int
     {
-        $lines = Db::rows("SELECT id FROM order_items WHERE order_id = ? AND round = ? AND station = ? AND status = 'ready' AND deleted = 0", [$orderId, $round, $station]);
-        foreach ($lines as $l) {
-            Db::save('order_items', ['id' => $l['id'], 'status' => 'sent', 'ready_at' => null, 'called_at' => null]);
-        }
-        if ($lines) {
-            self::announce($orderId);
-            Audit::log('kitchen.recall', Orders::where(Orders::get($orderId)) . ' · ' . count($lines) . ' ürün geri alındı', 'order', $orderId);
-        }
-        return count($lines);
+        // read and written in one lock: a plate voided, sent or carried out a moment ago is seen, never written over
+        return Db::tx(static function () use ($orderId, $round, $station): int {
+            $lines = Db::rows("SELECT id FROM order_items WHERE order_id = ? AND round = ? AND station = ? AND status = 'ready' AND deleted = 0", [$orderId, $round, $station]);
+            foreach ($lines as $l) {
+                Db::save('order_items', ['id' => $l['id'], 'status' => 'sent', 'ready_at' => null, 'called_at' => null]);
+            }
+            if ($lines) {
+                self::announce($orderId);
+                Audit::log('kitchen.recall', Orders::where(Orders::get($orderId)) . ' · ' . count($lines) . ' ürün geri alındı', 'order', $orderId);
+            }
+            return count($lines);
+        });
     }
 
     /** After a split, a merge, a cancelled or a taken-back plate: the alerts of the orders involved built again. */
@@ -236,20 +251,23 @@ final class Kitchen
      */
     public static function served(string $orderId, ?array $lineIds = null): void
     {
-        if ($lineIds === []) {
-            return;
-        }
-        $sql = "SELECT id FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0";
-        $p = [$orderId];
-        if ($lineIds !== null) {
-            $sql .= ' AND id IN (' . Db::in($lineIds) . ')';
-            $p = [...$p, ...$lineIds];
-        }
-        foreach (Db::rows($sql, $p) as $l) {
-            Db::save('order_items', ['id' => $l['id'], 'status' => 'served', 'served_at' => Clock::ms()]);
-        }
-        self::announce($orderId); // carried out: off the alert, whichever way they were handed over
-        \Sofrexa\Modules\Orders\Delivery::noteHanded($orderId);
+        // read and written in one lock: a plate voided, sent or carried out a moment ago is seen, never written over
+        Db::tx(static function () use ($orderId, $lineIds): void {
+            if ($lineIds === []) {
+                return;
+            }
+            $sql = "SELECT id FROM order_items WHERE order_id = ? AND status = 'ready' AND deleted = 0";
+            $p = [$orderId];
+            if ($lineIds !== null) {
+                $sql .= ' AND id IN (' . Db::in($lineIds) . ')';
+                $p = [...$p, ...$lineIds];
+            }
+            foreach (Db::rows($sql, $p) as $l) {
+                Db::save('order_items', ['id' => $l['id'], 'status' => 'served', 'served_at' => Clock::ms()]);
+            }
+            self::announce($orderId); // carried out: off the alert, whichever way they were handed over
+            \Sofrexa\Modules\Orders\Delivery::noteHanded($orderId);
+        });
     }
 
     private static function open(string $orderId, int $round, string $station): array

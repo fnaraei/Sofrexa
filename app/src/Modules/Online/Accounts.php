@@ -25,10 +25,18 @@ final class Accounts
             return null;
         }
         $a = self::get($id);
-        if (!$a) {
-            unset($_SESSION['online']);
+        // the session remembers the password it was opened with: a new password (a reset) signs every other session
+        // out, as for the staff (decision 55); one with no such stamp signs in again
+        if (!$a || !is_string($_SESSION['online_cv'] ?? null) || !hash_equals($_SESSION['online_cv'], self::credentials($a))) {
+            unset($_SESSION['online'], $_SESSION['online_cv']);
+            return null;
         }
         return $a;
+    }
+
+    private static function credentials(array $a): string
+    {
+        return hash('sha256', 'online|' . ($a['password_hash'] ?? ''));
     }
 
     public static function get(string $id): ?array
@@ -130,25 +138,39 @@ final class Accounts
         return $a['code_sent_at'] ? max(0, (int) ceil((self::RESEND_AFTER - (Clock::ms() - (int) $a['code_sent_at'])) / 1000)) : 0;
     }
 
-    /** Checks a code; a wrong one counts, five wrong ones or ten minutes end it. */
-    private static function checkCode(array $a, string $purpose, string $code): void
+    /**
+     * Checks a code inside the caller's write lock and uses it up; a wrong one counts, five wrong ones or ten minutes end
+     * it. Returns false for a wrong code (the caller refuses once its lock is released, so the count is kept).
+     */
+    private static function takeCode(string $accountId, string $purpose, string $code): bool
     {
+        $a = self::get($accountId) ?? throw new \Sofrexa\Core\HttpError(404);
         $code = preg_replace('/\D/', '', strtr($code, ['۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4', '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9'])) ?? '';
         $ok = $a['code_hash'] && $a['code_purpose'] === $purpose && (int) $a['code_expires'] > Clock::ms() && (int) $a['code_tries'] < self::MAX_TRIES
             && strlen($code) === 6 && password_verify($code, (string) $a['code_hash']);
         if (!$ok) {
             Db::save('online_accounts', ['id' => $a['id'], 'code_tries' => (int) $a['code_tries'] + 1]);
-            throw new ValidationError(['code' => I18n::t('on.err_code')]);
+            return false;
         }
         Db::save('online_accounts', ['id' => $a['id'], 'code_hash' => null, 'code_purpose' => null, 'code_expires' => null, 'code_tries' => 0]);
+        return true;
     }
 
     /** O2: the right code opens the account and signs the customer in. */
     public static function verify(string $accountId, string $code): array
     {
-        $a = self::get($accountId) ?? throw new \Sofrexa\Core\HttpError(404);
-        self::checkCode($a, 'verify', $code);
-        Db::save('online_accounts', ['id' => $a['id'], 'verified_at' => $a['verified_at'] ?: Clock::ms()]);
+        // the code checked, used up and the account opened in one lock: one code opens it once
+        $ok = Db::tx(static function () use ($accountId, $code): bool {
+            if (!self::takeCode($accountId, 'verify', $code)) {
+                return false;
+            }
+            $a = self::get($accountId);
+            Db::save('online_accounts', ['id' => $a['id'], 'verified_at' => $a['verified_at'] ?: Clock::ms()]);
+            return true;
+        });
+        if (!$ok) {
+            throw new ValidationError(['code' => I18n::t('on.err_code')]);
+        }
         $a = self::get($accountId);
         self::signIn($a, true);
         return $a;
@@ -186,6 +208,7 @@ final class Accounts
             }
         }
         $_SESSION['online'] = $a['id'];
+        $_SESSION['online_cv'] = self::credentials($a);
         Db::save('online_accounts', ['id' => $a['id'], 'login_at' => Clock::ms(), 'lang' => I18n::lang()]);
     }
 
@@ -226,9 +249,21 @@ final class Accounts
         if ($pw !== $pw2) {
             throw new ValidationError(['password2' => I18n::t('on.err_match')]);
         }
-        self::checkCode($a, 'reset', $code);
-        Db::save('online_accounts', ['id' => $a['id'], 'password_hash' => password_hash($pw, PASSWORD_DEFAULT), 'verified_at' => $a['verified_at'] ?: Clock::ms()]);
-        $a = self::get($a['id']);
+        // the code checked, used up and the password set in one lock (audit 10): two requests with one code set one
+        // password; the other is refused, as with a code already used
+        $id = $a['id'];
+        $ok = Db::tx(static function () use ($id, $code, $pw): bool {
+            if (!self::takeCode($id, 'reset', $code)) {
+                return false;
+            }
+            $a = self::get($id);
+            Db::save('online_accounts', ['id' => $id, 'password_hash' => password_hash($pw, PASSWORD_DEFAULT), 'verified_at' => $a['verified_at'] ?: Clock::ms()]);
+            return true;
+        });
+        if (!$ok) {
+            throw new ValidationError(['code' => I18n::t('on.err_code')]);
+        }
+        $a = self::get($id);
         self::signIn($a, true);
         return $a;
     }

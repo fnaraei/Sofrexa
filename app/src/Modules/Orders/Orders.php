@@ -82,6 +82,12 @@ final class Orders
         if (!in_array($channel, ['table', 'qr', 'takeaway', 'delivery', 'online'], true)) {
             throw new \InvalidArgumentException('channel');
         }
+        // the next number and the shift read where the bill is written: two bills opened at once get two numbers (R6)
+        return Db::tx(static fn(): string => self::createLocked($channel, $attrs));
+    }
+
+    private static function createLocked(string $channel, array $attrs): string
+    {
         $day = self::businessDay();
         $base = App::isWeb() ? 5000 : 0;
         $no = (int) Db::value('SELECT COALESCE(MAX(no), ?) + 1 FROM orders WHERE day = ? AND no > ? AND no <= ?', [$base, $day, $base, $base + 4999]);
@@ -113,8 +119,9 @@ final class Orders
         if (!Db::value('SELECT 1 FROM tables WHERE id = ? AND deleted = 0', [$tableId])) {
             throw new HttpError(404);
         }
-        $open = Db::value("SELECT id FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 AND NOT (channel = 'qr' AND status = 'pending') ORDER BY opened_at LIMIT 1", [$tableId]);
-        return $open ?: self::create('table', ['table_id' => $tableId, 'guests' => $guests]);
+        // found or opened in one lock: two waiters starting the same empty table open one bill (R6)
+        return Db::tx(static fn(): string => Db::value("SELECT id FROM orders WHERE table_id = ? AND status IN ('pending', 'open', 'billed') AND deleted = 0 AND NOT (channel = 'qr' AND status = 'pending') ORDER BY opened_at LIMIT 1", [$tableId])
+            ?: self::create('table', ['table_id' => $tableId, 'guests' => $guests]));
     }
 
     // ------------------------------------------------------------ lines
@@ -211,6 +218,12 @@ final class Orders
     /** Quantity or note of an unsent line; quantity 0 removes it. */
     public static function updateLine(string $lineId, ?float $qty = null, ?string $note = null): void
     {
+        // the line read inside the lock: one sent to the kitchen a moment ago keeps the quantity it was sent with (R4)
+        Db::tx(static fn() => self::updateLineLocked($lineId, $qty, $note));
+    }
+
+    private static function updateLineLocked(string $lineId, ?float $qty, ?string $note): void
+    {
         $l = self::line($lineId);
         self::editable($l['order_id']);
         if ($l['status'] !== 'new') {
@@ -237,17 +250,17 @@ final class Orders
      */
     public static function send(string $orderId, ?array $lineIds = null): int
     {
-        $o = self::editable($orderId);
-        $new = Db::rows("SELECT * FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId]);
-        if ($lineIds !== null) {
-            $new = array_values(array_filter($new, static fn(array $l): bool => in_array($l['id'], $lineIds, true)));
-        }
-        if (!$new) {
-            return 0;
-        }
         $now = Clock::ms();
         // one step: the lines, their tickets and the stock they take go together or not at all
-        return Db::tx(static function () use ($new, $now, $o, $orderId): int {
+        return Db::tx(static function () use ($now, $orderId, $lineIds): int {
+            $o = self::editable($orderId);
+            $new = Db::rows("SELECT * FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$orderId]);
+            if ($lineIds !== null) {
+                $new = array_values(array_filter($new, static fn(array $l): bool => in_array($l['id'], $lineIds, true)));
+            }
+            if (!$new) {
+                return 0;
+            }
             $ids = array_column($new, 'id');
             // read again inside the lock: a second tap (or a second device) must not send the same lines twice
             $new = Db::rows("SELECT * FROM order_items WHERE id IN (" . Db::in($ids) . ") AND status = 'new' AND deleted = 0", $ids);
@@ -302,7 +315,7 @@ final class Orders
     public static function voidLine(string $lineId, string $reason, float $qty = 0): void
     {
         $l = self::line($lineId);
-        $o = self::editable($l['order_id']);
+        $o = self::openBill($l['order_id']);
         if ($l['status'] === 'void') {
             throw new \InvalidArgumentException(I18n::t('order.err_voided'));
         }
@@ -319,8 +332,10 @@ final class Orders
         }
         $u = Auth::user();
         [$voidId, $qty, $stock] = Db::tx(static function () use ($lineId, $qty, $reason, $u): array {
-            // read again inside the lock: two taps at once must not both void (and give the stock back twice)
+            // read again inside the lock: two taps at once must not both void (and give the stock back twice), and a bill
+            // paid a moment ago is not changed under its payment (R5)
             $l = Db::row('SELECT * FROM order_items WHERE id = ? AND deleted = 0', [$lineId]);
+            self::editable((string) ($l['order_id'] ?? ''));
             if (!$l || $l['status'] === 'void' || $l['status'] === 'new') {
                 throw new \InvalidArgumentException(I18n::t('order.err_voided'));
             }
@@ -397,7 +412,7 @@ final class Orders
         if (!Auth::can('cash.pay') && !Auth::can('orders.void')) {
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
-        $target = self::editable($orderId);
+        $target = self::openBill($orderId);
         $lineId = Db::tx(static function () use ($voidId, $orderId): string {
             $target = self::editable($orderId);
             self::notLeft($target); // read inside the lock, as in addItem
@@ -487,17 +502,21 @@ final class Orders
     /** Removes all discounts of an open order (a reverse entry keeps the history). */
     public static function clearDiscount(string $orderId): void
     {
-        $o = self::editable($orderId);
-        if (!\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId)) {
-            return;
-        }
-        // every entry in force is cancelled, not only the part the bill could use (a ₺150 discount on a ₺100 bill)
-        Db::tx(static function () use ($orderId): void {
+        // every entry in force is cancelled, not only the part the bill could use (a ₺150 discount on a ₺100 bill) —
+        // on a bill still open inside the lock: a paid bill keeps the discount it was paid with (R5)
+        $o = Db::tx(static function () use ($orderId): ?array {
+            $o = self::editable($orderId);
+            if (!\Sofrexa\Modules\Customers\Loyalty::activeDiscounts($orderId)) {
+                return null;
+            }
             self::replaceDiscounts($orderId, [], 'iptal');
             \Sofrexa\Modules\Customers\Loyalty::refund($orderId);
             self::recalc($orderId);
+            return $o;
         });
-        Audit::log('order.discount', self::where($o) . ' · indirim kaldırıldı', 'order', $orderId);
+        if ($o) {
+            Audit::log('order.discount', self::where($o) . ' · indirim kaldırıldı', 'order', $orderId);
+        }
     }
 
     // ------------------------------------------------------------ tables
@@ -508,6 +527,11 @@ final class Orders
      * many times over (a bill split off a split bill too), whichever of them the move started from.
      */
     public static function moveTable(string $orderId, string $tableId): void
+    {
+        Db::tx(static fn() => self::moveTableLocked($orderId, $tableId));
+    }
+
+    private static function moveTableLocked(string $orderId, string $tableId): void
     {
         $o = self::editable($orderId);
         if (!in_array($o['channel'], ['table', 'qr'], true)) {
@@ -548,8 +572,8 @@ final class Orders
      */
     public static function merge(string $fromId, string $intoId): void
     {
-        $from = self::editable($fromId);
-        $into = self::editable($intoId);
+        $from = self::openBill($fromId);
+        $into = self::openBill($intoId);
         Db::tx(static function () use ($fromId, $intoId, &$from, &$into): void {
             // both bills read again inside the lock: a payment taken on the merged-away bill at the same moment is seen,
             // and so is a bag taken out
@@ -616,20 +640,23 @@ final class Orders
 
     public static function setWaiter(string $orderId, string $userId): void
     {
-        $o = self::editable($orderId);
         $name = Db::value('SELECT name FROM users WHERE id = ? AND active = 1 AND deleted = 0', [$userId]);
         if ($name === null) {
             throw new HttpError(404);
         }
-        Db::save('orders', ['id' => $orderId, 'waiter_id' => $userId, 'assigned_at' => Clock::ms()]);
-        Notify::follow($orderId, $userId);
+        $o = Db::tx(static function () use ($orderId, $userId): array {
+            $o = self::editable($orderId);
+            Db::save('orders', ['id' => $orderId, 'waiter_id' => $userId, 'assigned_at' => Clock::ms()]);
+            Notify::follow($orderId, $userId);
+            return $o;
+        });
         Audit::log('order.transfer', self::where($o) . ' · garson → ' . $name, 'order', $orderId);
     }
 
     /** Moves the chosen lines to a separate bill of the same table (pay part of the table). Returns the new order id. */
     public static function split(string $orderId, array $lineIds): string
     {
-        $o = self::editable($orderId);
+        $o = self::openBill($orderId);
         self::notLeft($o);
         $lineIds = array_values(array_filter(array_map('strval', $lineIds)));
         $lines = $lineIds ? Db::rows('SELECT id FROM order_items WHERE order_id = ? AND id IN (' . Db::in($lineIds) . ") AND deleted = 0 AND status <> 'void'", [$orderId, ...$lineIds]) : [];
@@ -753,9 +780,64 @@ final class Orders
     /** Prints the pre-bill (adisyon) and marks the order as billed. */
     public static function preBill(string $orderId): void
     {
-        $o = self::editable($orderId);
-        Db::save('orders', ['id' => $orderId, 'status' => $o['status'] === 'pending' ? 'pending' : 'billed', 'printed_bill' => (int) $o['printed_bill'] + 1]);
+        Db::tx(static function () use ($orderId): void {
+            $o = self::editable($orderId);
+            Db::save('orders', ['id' => $orderId, 'status' => $o['status'] === 'pending' ? 'pending' : 'billed', 'printed_bill' => (int) $o['printed_bill'] + 1]);
+        });
         Tickets::preBill($orderId);
+    }
+
+    /** How many guests sit at the bill. */
+    public static function setGuests(string $orderId, int $guests): void
+    {
+        Db::tx(static function () use ($orderId, $guests): void {
+            self::editable($orderId);
+            Db::save('orders', ['id' => $orderId, 'guests' => max(0, min(99, $guests))]);
+        });
+    }
+
+    /** The note printed on the receipt. */
+    public static function setReceiptNote(string $orderId, string $note): void
+    {
+        Db::tx(static function () use ($orderId, $note): void {
+            self::editable($orderId);
+            Db::save('orders', ['id' => $orderId, 'receipt_note' => mb_substr($note, 0, 200) ?: null]);
+        });
+    }
+
+    /** "Hesap iste": the bill is asked for (the till is told by the caller). Returns the bill. */
+    public static function requestBill(string $orderId): array
+    {
+        return Db::tx(static function () use ($orderId): array {
+            $o = self::editable($orderId);
+            Db::save('orders', ['id' => $orderId, 'bill_at' => Clock::ms()]);
+            return $o;
+        });
+    }
+
+    /**
+     * "Masayı kapat": an unpaid bill is cancelled — with its reason once something went to the kitchen (void), silently
+     * when nothing did (its unsent lines go) — decided on the bill as it is inside the lock.
+     */
+    public static function discard(string $orderId, string $reason): void
+    {
+        $void = Db::tx(static function () use ($orderId): bool {
+            $o = self::editable($orderId);
+            if (array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'new' && $l['status'] !== 'void')) {
+                return true;
+            }
+            Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms()]);
+            foreach ($o['lines'] as $l) {
+                Db::softDelete('order_items', $l['id']);
+            }
+            self::recalc($orderId);
+            \Sofrexa\Modules\QrOrder\QrOrders::closeSessions($o['table_id']);
+            self::ended($orderId);
+            return false;
+        });
+        if ($void) {
+            self::void($orderId, $reason);
+        }
     }
 
     /**
@@ -766,7 +848,7 @@ final class Orders
      */
     public static function pay(string $orderId, array $parts, ?string $customerId = null, bool $receipt = true, ?int $limit = null): array
     {
-        $o = self::editable($orderId);
+        $o = self::openBill($orderId);
         if (!array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'void')) {
             throw new \InvalidArgumentException(I18n::t('order.err_empty'));
         }
@@ -1014,7 +1096,7 @@ final class Orders
         if (!Auth::can('orders.void')) {
             throw new HttpError(403, I18n::t('err.forbidden'));
         }
-        $o = self::editable($orderId);
+        $o = self::openBill($orderId);
         $reason = trim($reason) ?: '—';
         $ask = [];
         Db::tx(static function () use (&$o, $orderId, $reason, &$ask): void {
@@ -1140,7 +1222,22 @@ final class Orders
     }
 
     /** The order, if it can still change (not paid or void). */
+    /**
+     * The open bill about to be changed — only inside the write lock (Db::tx), where what it says still holds when the
+     * change is written: read before the lock, a payment, a void or a closing made in between would go unseen (audits 8–10:
+     * every race so far was this). Called outside a transaction it refuses, so no change can be written on a bill read too
+     * early; pages that only show a bill, or check it before calling the change, use openBill().
+     */
     public static function editable(string $orderId): array
+    {
+        if (!Db::pdo()->inTransaction()) {
+            throw new \LogicException('Orders::editable() outside a transaction: read the bill inside the lock that changes it');
+        }
+        return self::openBill($orderId);
+    }
+
+    /** An open bill, to show or to check before a change (the change reads it again with editable(), inside its lock). */
+    public static function openBill(string $orderId): array
     {
         $o = self::get($orderId);
         if (!in_array($o['status'], self::OPEN, true)) {

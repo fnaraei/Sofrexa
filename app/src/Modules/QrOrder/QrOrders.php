@@ -339,11 +339,14 @@ final class QrOrders
     /** "Reddet": the guest order is cancelled before anything reached the kitchen. */
     public static function reject(string $orderId): void
     {
-        $o = self::pendingOrder($orderId);
-        $now = Clock::ms();
-        Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => $now, 'intake_at' => $o['intake_at'] ?: $now]);
-        Orders::ended($orderId);
-        Audit::log('order.qr_reject', Orders::where($o) . ' · ' . \Sofrexa\Core\Money::fmt((int) $o['total'], false, 'tr'), 'order', $orderId);
+        // read inside the lock: a guest order approved a moment ago is not turned down after
+        Db::tx(static function () use ($orderId): void {
+            $o = self::pendingOrder($orderId);
+            $now = Clock::ms();
+            Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => $now, 'intake_at' => $o['intake_at'] ?: $now]);
+            Orders::ended($orderId);
+            Audit::log('order.qr_reject', Orders::where($o) . ' · ' . \Sofrexa\Core\Money::fmt((int) $o['total'], false, 'tr'), 'order', $orderId);
+        });
     }
 
     private static function pendingOrder(string $orderId): array

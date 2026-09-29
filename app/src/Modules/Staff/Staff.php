@@ -361,9 +361,39 @@ final class Staff
      * the profile as it is now for someone with no history at all.
      * @return array{base_salary:int, commission_pct:float, pay_basis:?string, per_delivery:int}
      */
+    public const TERMS = ['base_salary', 'commission_pct', 'pay_basis', 'per_delivery'];
+
+    /**
+     * Before a save of a users row: its pay terms as they are (null for a new person), or false when the save does not
+     * touch them. Db::save calls this and recordTerms() — every change of a profile, whatever page or import makes it.
+     */
+    public static function termsBefore(array $row): array|false|null
+    {
+        if (!array_intersect_key($row, array_flip(self::TERMS))) {
+            return false;
+        }
+        return Db::row('SELECT ' . implode(', ', self::TERMS) . ' FROM users WHERE id = ?', [$row['id']]);
+    }
+
+    /**
+     * After it: a change of the pay terms is kept as a row of its own, dated when and where it was made, and replicated
+     * like the payroll itself — so the other copy has the same history, every step of it, however late it hears of it
+     * and whatever else changed on the profile since (audit 10; decision 52).
+     */
+    public static function recordTerms(string $userId, ?array $before): void
+    {
+        $now = Db::row('SELECT ' . implode(', ', self::TERMS) . ' FROM users WHERE id = ?', [$userId]);
+        $norm = static fn(?array $t): array => $t ? [(int) $t['base_salary'], round((float) $t['commission_pct'], 2), (string) $t['pay_basis'], (int) $t['per_delivery']] : [0, 0.0, '', 0];
+        if (!$now || $norm($now) === $norm($before) || ($before === null && $norm($now) === [0, 0.0, (string) $now['pay_basis'], 0])) {
+            return;
+        }
+        Db::append('pay_terms', ['user_id' => $userId, 'from_month' => date('Y-m', intdiv(Clock::ms(), 1000)), 'base_salary' => (int) $now['base_salary'],
+            'commission_pct' => (float) $now['commission_pct'], 'pay_basis' => $now['pay_basis'], 'per_delivery' => (int) $now['per_delivery'], 'at' => Clock::ms()]);
+    }
+
     public static function termsFor(array $u, string $month): array
     {
-        // by the time the change was made (the profile's own updated_at, the same on both copies — 021), up to the month's end
+        // by when the change was made (kept with it and replicated with it), up to the month's end
         $end = (int) strtotime(date('Y-m-01', (int) strtotime(preg_match('/^\d{4}-\d{2}$/', $month) ? $month . '-01' : 'now')) . ' +1 month') * 1000;
         $t = Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? AND at < ? ORDER BY at DESC, rowid DESC LIMIT 1', [$u['id'], $end])
             ?? Db::row('SELECT base_salary, commission_pct, pay_basis, per_delivery FROM pay_terms WHERE user_id = ? ORDER BY at, rowid LIMIT 1', [$u['id']])

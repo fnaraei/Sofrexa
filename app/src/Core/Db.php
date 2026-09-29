@@ -110,6 +110,8 @@ final class Db
     public static function save(string $table, array $row): string
     {
         $row['id'] ??= Uuid::v7();
+        // a person's pay terms as they were, for the history kept where the change is made (decision 52)
+        $terms = $table === 'users' ? \Sofrexa\Modules\Staff\Staff::termsBefore($row) : false;
         // Last write wins between the PC and the web copy: an edit must beat the version it replaces,
         // even when this machine's clock runs a little behind the one that wrote that version.
         $current = self::value('SELECT updated_at FROM ' . self::ident($table) . ' WHERE id = ?', [$row['id']]);
@@ -124,6 +126,9 @@ final class Db
             self::insert($table, $row);
         }
         Sync::touch($table, $row['id']);
+        if ($terms !== false) {
+            \Sofrexa\Modules\Staff\Staff::recordTerms($row['id'], $terms);
+        }
         return $row['id'];
     }
 

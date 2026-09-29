@@ -241,9 +241,9 @@ final class Loyalty
      */
     public static function attach(string $orderId, ?string $customerId): void
     {
-        $o = Orders::editable($orderId);
         $c = $customerId ? Customers::find($customerId) : null;
-        Db::tx(static function () use ($o, $orderId, $customerId, $c): void {
+        $o = Db::tx(static function () use ($orderId, $customerId, $c): array {
+            $o = Orders::editable($orderId); // the bill read inside the lock that changes it
             self::unredeem($orderId);
             self::rebuild($orderId, static fn(array $d): bool => !self::isAuto($d));
             Db::save('orders', ['id' => $orderId, 'customer_id' => $customerId]);
@@ -257,6 +257,7 @@ final class Loyalty
                 }
             }
             Orders::recalc($orderId);
+            return $o;
         });
         Audit::log('order.customer', Orders::where($o) . ' · ' . ($c['name'] ?? '—'), 'order', $orderId);
     }
@@ -415,6 +416,7 @@ final class Loyalty
     public static function unredeem(string $orderId): void
     {
         Db::tx(static function () use ($orderId): void {
+            Orders::editable($orderId); // a paid bill keeps the points it was paid with
             if (self::used($orderId) <= 0) {
                 return; // asked inside the lock: taken back once, however many taps
             }

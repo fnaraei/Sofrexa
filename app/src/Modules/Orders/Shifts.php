@@ -63,6 +63,12 @@ final class Shifts
     public static function move(string $kind, string $currency, float $amount, string $reason, ?string $note = null, ?string $shiftId = null, ?string $reverses = null, ?string $photo = null, ?string $ref = null): string
     {
         \Sofrexa\Core\Router::tillOnly();
+        // the shift is the one open inside the lock the move is written in: a shift closed a moment ago takes no money (R3)
+        return Db::tx(static fn(): string => self::moveLocked($kind, $currency, $amount, $reason, $note, $shiftId, $reverses, $photo, $ref));
+    }
+
+    private static function moveLocked(string $kind, string $currency, float $amount, string $reason, ?string $note, ?string $shiftId, ?string $reverses, ?string $photo, ?string $ref): string
+    {
         $shiftId ??= self::currentId();
         if (!$shiftId) {
             throw new \InvalidArgumentException(I18n::t('shift.err_none'));
@@ -113,13 +119,16 @@ final class Shifts
 
     public static function noSale(string $reason = ''): void
     {
-        if (!Auth::can('cash.nosale')) {
-            throw new \Sofrexa\Core\HttpError(403, I18n::t('err.forbidden'));
-        }
-        $shift = self::forCash();
-        Db::append('cash_moves', ['shift_id' => $shift, 'kind' => 'nosale', 'currency' => 'TRY', 'amount_fx' => 0, 'amount' => 0, 'reason' => mb_substr($reason ?: 'satışsız açma', 0, 120), 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
-        Audit::log('cash.nosale', I18n::t('audit.nosale_text', [], 'tr') . ($reason !== '' ? ' · ' . $reason : ''), 'shift', $shift);
-        Tickets::drawer();
+        // the shift read inside the lock the entry is written in
+        Db::tx(static function () use ($reason): void {
+            if (!Auth::can('cash.nosale')) {
+                throw new \Sofrexa\Core\HttpError(403, I18n::t('err.forbidden'));
+            }
+            $shift = self::forCash();
+            Db::append('cash_moves', ['shift_id' => $shift, 'kind' => 'nosale', 'currency' => 'TRY', 'amount_fx' => 0, 'amount' => 0, 'reason' => mb_substr($reason ?: 'satışsız açma', 0, 120), 'user_id' => Auth::user()['id'] ?? null, 'at' => Clock::ms()]);
+            Audit::log('cash.nosale', I18n::t('audit.nosale_text', [], 'tr') . ($reason !== '' ? ' · ' . $reason : ''), 'shift', $shift);
+            Tickets::drawer();
+        });
     }
 
     /**

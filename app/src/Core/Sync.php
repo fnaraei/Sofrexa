@@ -23,7 +23,7 @@ final class Sync
     /** Append-only replicated tables (id, never updated). */
     public const APPEND = [
         'audit_log', 'price_history', 'payments', 'order_discounts', 'cash_moves', 'fx_rates', 'loyalty_ledger',
-        'account_ledger', 'stock_docs', 'stock_moves', 'stock_count_lines', 'time_entries', 'payroll', 'finance_entries',
+        'account_ledger', 'stock_docs', 'stock_moves', 'stock_count_lines', 'time_entries', 'payroll', 'pay_terms', 'finance_entries',
     ];
 
     private static bool $muted = false;

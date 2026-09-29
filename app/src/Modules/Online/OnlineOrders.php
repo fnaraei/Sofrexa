@@ -284,12 +284,15 @@ final class OnlineOrders
     /** "Reddet": the order is cancelled before anything was cooked; the customer gets an e-mail. */
     public static function reject(string $orderId, string $reason = ''): void
     {
-        $o = Orders::editable($orderId);
-        if ($o['channel'] !== 'online' || $o['status'] !== 'pending') {
-            throw new \InvalidArgumentException(I18n::t('qr.err_handled'));
-        }
-        Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim('iptal: ' . ($reason ?: 'reddedildi'))]);
-        Orders::ended($orderId);
+        $o = Db::tx(static function () use ($orderId, $reason): array {
+            $o = Orders::editable($orderId); // turned down once, and not after it was approved a moment ago
+            if ($o['channel'] !== 'online' || $o['status'] !== 'pending') {
+                throw new \InvalidArgumentException(I18n::t('qr.err_handled'));
+            }
+            Db::save('orders', ['id' => $orderId, 'status' => 'void', 'closed_at' => Clock::ms(), 'note' => trim('iptal: ' . ($reason ?: 'reddedildi'))]);
+            Orders::ended($orderId);
+            return $o;
+        });
         Audit::log('order.online_reject', Orders::where($o) . ' · ' . ($reason ?: '—'), 'order', $orderId);
         self::notices();
     }

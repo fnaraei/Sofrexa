@@ -56,7 +56,7 @@ final class OrderController
     /** W3: phone order summary. */
     public function summary(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         View::page('orders/summary', ['o' => $o, 'nav' => 'tables', 'scripts' => ['js/order.js']]);
     }
 
@@ -93,20 +93,20 @@ final class OrderController
     public function lineSheet(Request $req): void
     {
         $l = Orders::line($req->param('id'));
-        Orders::editable($l['order_id']);
+        Orders::openBill($l['order_id']);
         Response::json(['ok' => true, 'html' => View::partial('orders/_sheet_line', ['l' => $l])]);
     }
 
     public function send(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         $n = Orders::send($o['id']);
         $this->state($o['id'], ['message' => $n ? I18n::t('order.sent', ['n' => digits($n)]) : I18n::t('order.nothing_new'), 'sent' => $n]);
     }
 
     public function preBill(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         if (Db::value("SELECT 1 FROM order_items WHERE order_id = ? AND status = 'new' AND deleted = 0", [$o['id']])) {
             Orders::send($o['id']);
         }

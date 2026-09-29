@@ -75,7 +75,7 @@ final class TablesController
     /** Sub-sheets of W7: move, merge, split, guests, waiter, close. */
     public function sheet(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         $kind = $req->param('kind');
         $data = ['o' => $o];
         switch ($kind) {
@@ -124,8 +124,7 @@ final class TablesController
 
     public function guests(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
-        Db::save('orders', ['id' => $o['id'], 'guests' => max(0, min(99, $req->int('guests')))]);
+        Orders::setGuests($req->param('id'), $req->int('guests'));
         Response::json(['ok' => true, 'reload' => true]);
     }
 
@@ -139,8 +138,7 @@ final class TablesController
     /** "Hesap iste": marks the bill as asked for and tells the till. */
     public function requestBill(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
-        Db::save('orders', ['id' => $o['id'], 'bill_at' => Clock::ms()]);
+        $o = Orders::requestBill($req->param('id'));
         Notify::push('bill', ['where' => Orders::where($o), 'by' => Auth::user()['name']], null, 'cashier', $o['id']);
         Response::json(['ok' => true, 'message' => I18n::t('bill.requested')]);
     }
@@ -148,19 +146,7 @@ final class TablesController
     /** "Masayı kapat": cancels the unpaid bill (a reason is needed once something went to the kitchen). */
     public function close(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
-        $sent = array_filter($o['lines'], static fn(array $l): bool => $l['status'] !== 'new' && $l['status'] !== 'void');
-        if ($sent) {
-            Orders::void($o['id'], $req->str('reason'));
-        } else {
-            Db::save('orders', ['id' => $o['id'], 'status' => 'void', 'closed_at' => Clock::ms()]);
-            foreach ($o['lines'] as $l) {
-                Db::softDelete('order_items', $l['id']);
-            }
-            Orders::recalc($o['id']);
-            \Sofrexa\Modules\QrOrder\QrOrders::closeSessions($o['table_id']);
-            Orders::ended($o['id']);
-        }
+        Orders::discard($req->param('id'), $req->str('reason'));
         Response::json(['ok' => true, 'message' => I18n::t('close.empty'), 'redirect' => '/tables']);
     }
 

@@ -247,21 +247,30 @@ return [
         same(['receipt2', 'bar'], array_column(Db::rows("SELECT kind FROM print_jobs WHERE kind IN ('receipt2', 'bar') ORDER BY done_at, rowid"), 'kind'));
     },
 
-    'R05 a paid bag stays on the board until it is handed over, however long; one closed before 021 does not come back' => function () use ($setup): void {
+    'R05 a paid bag stays on the board until it is handed over, however long — across the upgrade too (audit 10, 1)' => function () use ($setup): void {
         $s = $setup();
-        $d = Delivery::create(['type' => 'delivery', 'phone' => '0533 000 00 01', 'name' => 'Ali', 'address' => 'Adres 1', 'pay' => 'card', 'items' => [['item_id' => $s['pizza'], 'qty' => 1]]]);
+        $courier = Seed::user('Emre', 'courier', '6060');
+        $d = Delivery::create(['type' => 'delivery', 'phone' => '0533 000 00 01', 'name' => 'Ali', 'address' => 'Adres 1', 'courier_id' => $courier, 'pay' => 'card', 'items' => [['item_id' => $s['pizza'], 'qty' => 1]]]);
         Orders::pay($d, [['method' => 'card', 'amount' => (int) Orders::get($d)['total']]], null, false);
         Clock::freeze(Clock::ms() + 30 * 3_600_000);
         check(in_array($d, array_column(Delivery::open(), 'id'), true), 'still waiting, thirty hours on');
-        // as 021 found it: a paid take-away from before, its dish never marked carried out
-        $old = Orders::create('takeaway', ['label' => 'Eski']);
-        Orders::addItem($old, $s['pizza']);
-        Orders::send($old);
-        Db::exec("UPDATE orders SET status = 'paid', closed_at = ? WHERE id = ?", [Clock::ms(), $old]);
-        Db::exec("DELETE FROM schema_migrations WHERE name = '021_sync_safe'");
+        // a take-away paid and carried out: handed over
+        $gone = Orders::create('takeaway', ['label' => 'Gitti']);
+        Orders::addItem($gone, $s['pizza']);
+        Orders::send($gone);
+        Kitchen::ready($gone, 1, 'kitchen');
+        Orders::pay($gone, [['method' => 'card', 'amount' => (int) Orders::get($gone)['total']]], null, false);
+        Kitchen::served($gone);
+        // the upgrade as a database from before 021 meets it: what the rows say decides, nothing is guessed
+        Db::exec("DELETE FROM schema_migrations WHERE name IN ('021_sync_safe', '022_state_not_guess')");
         Db::exec('ALTER TABLE orders DROP COLUMN handed_at');
         \Sofrexa\Core\Migrator::run();
-        check(!in_array($old, array_column(Delivery::open(), 'id'), true), 'the old bill stays ended');
+        check(in_array($d, array_column(Delivery::open(), 'id'), true), 'the paid bag still in the kitchen is still on the board');
+        check(!in_array($gone, array_column(Delivery::open(), 'id'), true), 'the one carried out is not');
+        Kitchen::ready($d, 1, 'kitchen');
+        Delivery::move($d, 'way');
+        Delivery::move($d, 'done');
+        check(!in_array($d, array_column(Delivery::open(), 'id'), true), 'delivered: off the board');
     },
 
     'R06 at 01:30 the forms suggest the business day, not the calendar day' => function () use ($setup): void {

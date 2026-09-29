@@ -67,7 +67,7 @@ final class CashierController
 
     public function payPost(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         if (!Shifts::currentId()) {
             throw new \InvalidArgumentException(I18n::t('order.err_no_shift'));
         }
@@ -122,7 +122,7 @@ final class CashierController
     /** C2c / C3c "İade et ve kapat": the overpaid difference goes back (drawer or card machine) and the bill closes. */
     public function refund(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         $plan = Orders::refundPlan($o);
         $amount = Orders::refund($o['id'], $req->str('method'), $req->bool('receipt'));
         Flash::set('success', $plan['money'] > 0 ? I18n::t('pay.over_done', ['amount' => money($amount)]) : I18n::t('pay.over_done_acc', ['amount' => money($amount)]));
@@ -132,7 +132,7 @@ final class CashierController
     /** Sheets of the payment screen: discount, receipt note, the bill (phone), more actions (phone). */
     public function paySheet(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         $kind = $req->param('kind');
         if (!in_array($kind, ['discount', 'note', 'bill', 'more', 'customer', 'points'], true)) {
             throw new HttpError(404);
@@ -151,7 +151,7 @@ final class CashierController
     /** Puts a customer on the bill or takes them off (tier / own discount follows, points used go back). */
     public function customer(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         $cid = $req->str('customer_id') ?: null;
         if ($cid !== $o['customer_id']) {
             Loyalty::attach($o['id'], $cid);
@@ -162,15 +162,17 @@ final class CashierController
     /** C12: use all / half of the usable points, or none (takes back what was used). */
     public function points(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
-        $v = self::pointsView($o);
         $mode = $req->str('mode');
-        $n = match ($mode) { 'all' => $v['usable'], 'half' => intdiv($v['usable'], 2), default => 0 };
-        \Sofrexa\Core\Db::tx(static function () use ($o, $n): void {
+        // what can be used, worked out on the bill as it is inside the lock that uses it
+        $n = \Sofrexa\Core\Db::tx(static function () use ($req, $mode): int {
+            $o = Orders::editable($req->param('id'));
+            $v = self::pointsView($o);
+            $n = match ($mode) { 'all' => $v['usable'], 'half' => intdiv($v['usable'], 2), default => 0 };
             Loyalty::unredeem($o['id']);
             if ($n > 0) {
                 Loyalty::redeem($o['id'], $n);
             }
+            return $n;
         });
         Response::json(['ok' => true, 'message' => $n > 0 ? I18n::t('pay.points_used', ['n' => digits(I18n::num($n)), 'amount' => money($n * Loyalty::pointValue())]) : I18n::t('pay.points_kept'), 'reload' => true]);
     }
@@ -190,7 +192,7 @@ final class CashierController
 
     public function discount(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
+        $o = Orders::openBill($req->param('id'));
         if ($req->bool('clear')) {
             Orders::clearDiscount($o['id']);
         } else {
@@ -206,8 +208,7 @@ final class CashierController
 
     public function note(Request $req): void
     {
-        $o = Orders::editable($req->param('id'));
-        Db::save('orders', ['id' => $o['id'], 'receipt_note' => mb_substr($req->str('note'), 0, 200) ?: null]);
+        Orders::setReceiptNote($req->param('id'), $req->str('note'));
         Response::json(['ok' => true, 'message' => I18n::t('ui.saved'), 'reload' => true]);
     }
 
